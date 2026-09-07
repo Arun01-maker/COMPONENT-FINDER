@@ -5,17 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Component Finder</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #0f1715; color: #e2e8f0; margin: 0; padding: 20px; }
-    .container { max-width: 800px; margin: 0 auto; }
-    .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
-    input { flex: 1; padding: 12px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #fff; }
-    button { padding: 12px 24px; border: none; border-radius: 6px; background: #e07a5f; color: #fff; cursor: pointer; font-weight: bold; }
-    .status { color: #34d399; margin-bottom: 20px; font-size: 14px; }
-    .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-    .card { background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; }
-    .card h4 { margin: 0 0 8px 0; font-size: 16px; color: #f8fafc; }
-    .card .price { color: #34d399; font-weight: bold; margin-bottom: 8px; }
-    .card a { display: inline-block; color: #38bdf8; text-decoration: none; margin-top: 8px; font-size: 14px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f19; color: #e2e8f0; margin: 0; padding: 24px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 28px; margin-bottom: 20px; text-align: center; }
+    .search-box { display: flex; gap: 12px; margin-bottom: 24px; }
+    input { flex: 1; padding: 14px; border-radius: 8px; border: 1px solid #1e293b; background: #1e293b; color: #fff; font-size: 16px; outline: none; }
+    input:focus { border-color: #e07a5f; }
+    button { padding: 14px 28px; border: none; border-radius: 8px; background: #e07a5f; color: #fff; cursor: pointer; font-weight: bold; font-size: 16px; }
+    
+    .status-panel { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; margin-bottom: 24px; display: none; }
+    .status-title { font-weight: bold; margin-bottom: 12px; color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+    .site-status-card { background: #1e293b; padding: 10px 14px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    
+    .badge-pending { background: #334155; color: #94a3b8; }
+    .badge-searching { background: #7c2d12; color: #fb923c; animation: pulse 1.2s infinite; }
+    .badge-available { background: #064e3b; color: #34d399; }
+    .badge-unavailable { background: #450a0a; color: #f87171; }
+
+    @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+    .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .card { background: #111827; padding: 16px; border-radius: 8px; border: 1px solid #1f2937; display: flex; flex-direction: column; justify-content: space-between; }
+    .card h4 { margin: 0 0 10px 0; font-size: 15px; color: #f8fafc; line-height: 1.4; }
+    .card .price { color: #34d399; font-weight: bold; font-size: 16px; margin-bottom: 6px; }
+    .card .source { font-size: 12px; color: #94a3b8; }
+    .card a { display: inline-block; color: #38bdf8; text-decoration: none; margin-top: 12px; font-size: 14px; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -23,50 +39,89 @@
 <div class="container">
   <h1>Component Finder</h1>
   <div class="search-box">
-    <input type="text" id="queryInput" placeholder="Enter component name (e.g. LM2596)...">
+    <input type="text" id="queryInput" placeholder="Enter component (e.g. LM2596, ESP32)..." onkeydown="if(event.key === 'Enter') startSearch()">
     <button onclick="startSearch()">Search</button>
   </div>
 
-  <div id="statusText" class="status"></div>
+  <div id="statusPanel" class="status-panel">
+    <div class="status-title">Distributor Checking Status</div>
+    <div id="statusGrid" class="status-grid"></div>
+  </div>
+
   <div id="results" class="results-grid"></div>
 </div>
 
 <script>
 let evtSource = null;
 
+function makeId(name) {
+  return 'site-' + name.replace(/[^a-zA-Z0-9]/g, '');
+}
+
 function startSearch() {
   const query = document.getElementById('queryInput').value.trim();
   const resultsDiv = document.getElementById('results');
-  const statusDiv = document.getElementById('statusText');
+  const statusPanel = document.getElementById('statusPanel');
+  const statusGrid = document.getElementById('statusGrid');
 
   if (!query) return;
 
   resultsDiv.innerHTML = '';
-  statusDiv.textContent = '● Connecting to search server...';
+  statusGrid.innerHTML = '';
+  statusPanel.style.display = 'block';
 
   if (evtSource) {
     evtSource.close();
   }
 
-  // Connect directly to your live Render instance endpoint
   const backendUrl = `https://component-finder.onrender.com/api/search?q=${encodeURIComponent(query)}`;
   evtSource = new EventSource(backendUrl);
 
   evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
 
-    if (data.type === 'meta') {
-      statusDiv.textContent = `● Searching across distributors...`;
+    if (data.type === 'init') {
+      data.sites.forEach(siteName => {
+        const id = makeId(siteName);
+        const item = document.createElement('div');
+        item.className = 'site-status-card';
+        item.id = id;
+        item.innerHTML = `
+          <span>${siteName}</span>
+          <span class="badge badge-pending">Pending</span>
+        `;
+        statusGrid.appendChild(item);
+      });
     } 
+    else if (data.type === 'status') {
+      const id = makeId(data.site);
+      const card = document.getElementById(id);
+      if (card) {
+        if (data.state === 'searching') {
+          card.querySelector('.badge').className = 'badge badge-searching';
+          card.querySelector('.badge').textContent = 'Searching...';
+        } else if (data.state === 'done') {
+          if (data.count > 0) {
+            card.querySelector('.badge').className = 'badge badge-available';
+            card.querySelector('.badge').textContent = `Available (${data.count})`;
+          } else {
+            card.querySelector('.badge').className = 'badge badge-unavailable';
+            card.querySelector('.badge').textContent = 'Not Available';
+          }
+        }
+      }
+    }
     else if (data.type === 'result') {
       if (data.products && data.products.length > 0) {
         data.products.forEach(product => {
           const card = document.createElement('div');
           card.className = 'card';
           card.innerHTML = `
-            <h4>${product.title}</h4>
-            <div class="price">${product.price}</div>
-            <div style="font-size: 12px; color: #94a3b8;">Source: ${data.site}</div>
+            <div>
+              <h4>${product.title}</h4>
+              <div class="price">${product.price}</div>
+              <div class="source">Source: ${data.site}</div>
+            </div>
             <a href="${product.link}" target="_blank">View Item &rarr;</a>
           `;
           resultsDiv.appendChild(card);
@@ -74,13 +129,11 @@ function startSearch() {
       }
     } 
     else if (data.type === 'done') {
-      statusDiv.textContent = '● Search completed!';
       evtSource.close();
     }
   };
 
-  evtSource.onerror = function(err) {
-    statusDiv.textContent = '● Search connection ended or timed out.';
+  evtSource.onerror = function() {
     evtSource.close();
   };
 }
