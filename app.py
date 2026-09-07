@@ -18,16 +18,19 @@ HEADERS = {
 def index():
     return {"status": "Component Finder API is live and running!"}
 
-def scrape_robu(query):
+# --- SCRAPER IMPLEMENTATIONS ---
+
+def scrape_woocommerce(site_name, base_url, query):
+    """Scrapes standard WooCommerce stores like Robu and Sharvi"""
     products = []
     try:
-        url = f"https://robu.in/?s={query}&post_type=product"
+        url = f"{base_url}/?s={query}&post_type=product"
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
-            items = soup.select(".product, .product-grid-item, li.type-product")
+            items = soup.select(".product, .product-grid-item, li.type-product, .product-small")
             for item in items[:4]:
-                title_el = item.select_one(".product-title, .woocommerce-loop-product__title, h2, h3, .entry-title")
+                title_el = item.select_one(".product-title, .woocommerce-loop-product__title, h2, h3, .name")
                 price_el = item.select_one(".price, .amount")
                 link_el = item.select_one("a[href]")
                 if title_el:
@@ -36,13 +39,13 @@ def scrape_robu(query):
                     link = link_el["href"] if link_el else url
                     products.append({"title": title, "price": price, "link": link})
     except Exception as e:
-        print(f"Robu error: {e}")
+        print(f"Error scraping {site_name}: {e}")
     return products
 
-def scrape_shopify_site(site_name, base_url, query):
+def scrape_shopify(site_name, base_url, query):
+    """Queries Shopify native JSON predictive search API"""
     products = []
     try:
-        # Use Shopify's native JSON predictive search API
         url = f"{base_url}/search/suggest.json?q={query}&resources[type]=product&resources[limit]=4"
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
@@ -50,38 +53,19 @@ def scrape_shopify_site(site_name, base_url, query):
             items = data.get("resources", {}).get("results", {}).get("products", [])
             for item in items:
                 title = item.get("title")
-                price = f"₹{item.get('price')}" if item.get('price') else "Check Site"
+                price_val = item.get("price")
+                price = f"₹{price_val}" if price_val else "Check Site"
                 link = base_url + item.get("url", "")
                 products.append({"title": title, "price": price, "link": link})
     except Exception as e:
-        print(f"Shopify search error for {site_name}: {e}")
+        print(f"Error scraping {site_name}: {e}")
     return products
 
-def scrape_sharvi(query):
+def scrape_opencart(site_name, base_url, query):
+    """Scrapes OpenCart platforms like Leeds Electronics & ElectronicsComp"""
     products = []
     try:
-        url = f"https://sharvielectronics.com/?s={query}&post_type=product"
-        resp = requests.get(url, headers=HEADERS, timeout=8)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            items = soup.select("li.product, div.product-small, .product-item")
-            for item in items[:4]:
-                title_el = item.select_one(".woocommerce-loop-product__title, .product-title, h3, a")
-                price_el = item.select_one(".price, .amount")
-                link_el = item.select_one("a[href]")
-                if title_el:
-                    title = title_el.get_text(strip=True)
-                    price = price_el.get_text(strip=True) if price_el else "Check Site"
-                    link = link_el["href"] if link_el else url
-                    products.append({"title": title, "price": price, "link": link})
-    except Exception as e:
-        print(f"Sharvi error: {e}")
-    return products
-
-def scrape_leeds(query):
-    products = []
-    try:
-        url = f"https://www.leedscart.com/index.php?route=product/search&search={query}"
+        url = f"{base_url}/index.php?route=product/search&search={query}"
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -95,31 +79,30 @@ def scrape_leeds(query):
                     link = title_el.get("href", url)
                     products.append({"title": title, "price": price, "link": link})
     except Exception as e:
-        print(f"Leeds error: {e}")
+        print(f"Error scraping {site_name}: {e}")
     return products
 
-def scrape_element14(query):
+def scrape_evelta(query):
+    """Scrapes Evelta Electronics search endpoint"""
     products = []
     try:
-        url = f"https://in.element14.com/w/c/?st={query}"
+        url = f"https://www.evelta.com/index.php?subcats=Y&pcode_from_q=Y&pshort=Y&pfull=Y&pname=Y&pkeywords=Y&search_performed=Y&q={query}&dispatch=products.search"
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
-            items = soup.select("tr.productRow, tr.tblRow, .productDisplay")
+            items = soup.select(".ty-column4, .ty-grid-list__item")
             for item in items[:4]:
-                title_el = item.select_one("a.description, .productDescription, .title")
-                price_el = item.select_one(".price, .discountPrice")
-                link_el = item.select_one("a[href]")
+                title_el = item.select_one(".product-title, .ty-grid-list__item-name a")
+                price_el = item.select_one(".ty-price, .price")
                 if title_el:
                     title = title_el.get_text(strip=True)
                     price = price_el.get_text(strip=True) if price_el else "Check Site"
-                    link = link_el["href"] if link_el else url
-                    if not link.startswith("http"):
-                        link = "https://in.element14.com" + link
+                    link = title_el.get("href", url)
                     products.append({"title": title, "price": price, "link": link})
     except Exception as e:
-        print(f"Element14 error: {e}")
+        print(f"Error scraping Evelta: {e}")
     return products
+
 
 @app.route("/api/search")
 def search():
@@ -131,34 +114,35 @@ def search():
             return
 
         targets = [
-            {"name": "Robu.in", "func": lambda q: scrape_robu(q)},
-            {"name": "ETStore", "func": lambda q: scrape_shopify_site("ETStore", "https://www.etstore.in", q)},
-            {"name": "Sharvi Electronics", "func": lambda q: scrape_sharvi(q)},
-            {"name": "Leeds Electronics", "func": lambda q: scrape_leeds(q)},
-            {"name": "Element14 India", "func": lambda q: scrape_element14(q)},
-            {"name": "Rajiv Electronics", "func": lambda q: scrape_shopify_site("Rajiv Electronics", "https://rajivelectronics.com", q)},
-            {"name": "Sparefly", "func": lambda q: scrape_shopify_site("Sparefly", "https://sparefly.com", q)}
+            {"name": "Leeds Electronics", "func": lambda q: scrape_opencart("Leeds Electronics", "https://www.leedscart.com", q)},
+            {"name": "ElectronicsComp", "func": lambda q: scrape_opencart("ElectronicsComp", "https://www.electronicscomp.com", q)},
+            {"name": "Robu.in", "func": lambda q: scrape_woocommerce("Robu.in", "https://robu.in", q)},
+            {"name": "ETStore", "func": lambda q: scrape_shopify("ETStore", "https://www.etstore.in", q)},
+            {"name": "Sharvi Electronics", "func": lambda q: scrape_woocommerce("Sharvi Electronics", "https://sharvielectronics.com", q)},
+            {"name": "Rajiv Electronics", "func": lambda q: scrape_shopify("Rajiv Electronics", "https://rajivelectronics.com", q)},
+            {"name": "Sparefly", "func": lambda q: scrape_shopify("Sparefly", "https://sparefly.com", q)},
+            {"name": "Evelta Electronics", "func": lambda q: scrape_evelta(q)},
+            {"name": "DNK Technologies", "func": lambda q: scrape_shopify("DNK Technologies", "https://dnktech.in", q)}
         ]
 
-        # 1. Send store list to frontend
+        # Send target website list to frontend UI
         site_names = [t["name"] for t in targets]
         yield f"data: {json.dumps({'type': 'init', 'sites': site_names})}\n\n"
         
-        # 2. Iterate through each site individually
         for target in targets:
             site_name = target["name"]
             
-            # Emit searching badge state
+            # Emit "Searching..." status badge
             yield f"data: {json.dumps({'type': 'status', 'site': site_name, 'state': 'searching'})}\n\n"
             
-            # Execute scraper
+            # Execute scraper function
             products = target["func"](query)
             count = len(products)
             
-            # Emit status state (Available vs Not Available)
+            # Emit "Available (count)" or "Not Available" badge
             yield f"data: {json.dumps({'type': 'status', 'site': site_name, 'state': 'done', 'count': count})}\n\n"
             
-            # Emit product payloads
+            # Stream card data to UI
             yield f"data: {json.dumps({'type': 'result', 'site': site_name, 'products': products})}\n\n"
             
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
