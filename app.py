@@ -5,10 +5,12 @@ import threading
 import urllib.parse
 
 from flask import Flask, Response, render_template, request, stream_with_context
+from flask_cors import CORS
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for cross-origin requests from GitHub Pages
 
 TARGET_SITES = [
     {
@@ -256,6 +258,7 @@ def api_search():
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
         },
     )
 
