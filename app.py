@@ -237,9 +237,10 @@ def sse_event_stream(query, filters):
             break
 
 
+# To this:
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return {"status": "Component Finder API is running!"}
 
 
 @app.route("/api/search")
