@@ -1,288 +1,278 @@
-<!DOCTYPE html>
-<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Component Finder — Parametric Search</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0a1310;
-    --bg-soft: #0e1a15;
-    --panel: #12211a;
-    --line: #22352a;
-    --line-bright: #3a5443;
-    --copper: #c9793d;
-    --copper-bright: #e59c5c;
-    --copper-dim: #6b4726;
-    --text: #edf1ea;
-    --text-dim: #8ba392;
-    --text-dimmer: #55685d;
-    --ok: #6fd88a;
-    --warn: #e3b04e;
-    --bad: #e2685a;
-    --bad-dim: #2e1815;
-    --radius: 3px;
-    --sans: "IBM Plex Sans", system-ui, sans-serif;
-    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: var(--sans);
-    background: radial-gradient(circle at 15% 0%, rgba(201,121,61,0.06), transparent 45%), var(--bg);
-    color: var(--text);
-    padding: 40px 20px 80px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .container { max-width: 1080px; margin: 0 auto; }
-  a { color: inherit; }
-
-  /* ---------- Header ---------- */
-  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
-  .brand-mark { width: 30px; height: 30px; flex-shrink: 0; position: relative; }
-  .brand-mark::before, .brand-mark::after { content: ""; position: absolute; background: var(--copper); }
-  .brand-mark::before { width: 100%; height: 2px; top: 50%; transform: translateY(-1px); }
-  .brand-mark::after { height: 100%; width: 2px; left: 50%; transform: translateX(-1px); }
-  .brand-mark .dot {
-    position: absolute; width: 6px; height: 6px; background: var(--copper-bright);
-    border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    box-shadow: 0 0 8px rgba(229,156,92,0.7);
-  }
-
-  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; }
-  p.tagline { color: var(--text-dim); font-size: 14px; margin: 6px 0 28px; max-width: 52ch; }
-
-  /* ---------- Parametric Search Panel ---------- */
-  .search-panel {
-    position: relative;
-    border: 1px solid var(--line);
-    background: var(--bg-soft);
-    border-radius: var(--radius);
-    padding: 20px;
-    margin-bottom: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .search-panel::before, .search-panel::after {
-    content: ""; position: absolute; width: 10px; height: 10px; border: 1.5px solid var(--copper-dim);
-  }
-  .search-panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-  .search-panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
-
-  .search-row-main {
-    display: flex;
-    gap: 10px;
-  }
-
-  input[type="text"], select.control-input {
-    padding: 11px 12px;
-    border-radius: var(--radius);
-    border: 1px solid var(--line);
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 14px;
-    outline: none;
-  }
-  input[type="text"]:focus, select.control-input:focus {
-    border-color: var(--line-bright);
-    box-shadow: 0 0 0 2px rgba(201,121,61,0.2);
-  }
-  input[type="text"]::placeholder { color: var(--text-dimmer); }
-
-  .main-query-input { flex: 1; font-size: 15px; }
-
-  /* Parametric Grid Inside Search Box */
-  .specs-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
-  }
-
-  .spec-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .spec-field label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-dim);
-    font-family: var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  select.control-input {
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238ba392'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    padding-right: 24px;
-  }
-
-  button.search-btn {
-    padding: 12px 24px;
-    border: 1px solid var(--copper);
-    border-radius: var(--radius);
-    background: var(--copper);
-    color: #1a1006;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  button.search-btn:hover { background: var(--copper-bright); border-color: var(--copper-bright); }
-  button.search-btn:disabled { background: transparent; color: var(--text-dim); border-color: var(--line-bright); cursor: default; }
-
-  .quick-parts { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 28px; }
-  .quick-part {
-    font-family: var(--mono); font-size: 12px; color: var(--text-dim); border: 1px solid var(--line);
-    background: transparent; padding: 5px 9px; border-radius: var(--radius); cursor: pointer;
-  }
-  .quick-part:hover { border-color: var(--copper-dim); color: var(--text); }
-
-  /* ---------- Query Preview Tag ---------- */
-  .query-preview {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--copper-bright);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  /* ---------- Results & Status ---------- */
-  .status-panel { display: none; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 28px; overflow: hidden; }
-  .status-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bg-soft); cursor: pointer; }
-  .status-header-left { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-  .status-spinner { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
-  .status-spinner.pulsing { animation: pulse 1.1s ease-in-out infinite; }
-  .status-spinner.done { background: var(--ok); }
-  @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-
-  .status-grid { border-top: 1px solid var(--line); }
-  .site-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--line); }
-  .site-row:last-child { border-bottom: none; }
-  .site-name { display: flex; align-items: center; gap: 10px; }
-  .site-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dimmer); }
-  .site-dot.searching { background: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
-  .site-dot.available { background: var(--ok); }
-  .site-dot.unavailable { background: var(--bad); }
-
-  .controls-bar { display: none; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-  .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-
-  .product-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; background: var(--bg-soft); }
-  .product-title { font-size: 14px; font-weight: 500; margin-bottom: 12px; }
-  .spec-badge { font-family: var(--mono); font-size: 10px; background: var(--bg); border: 1px solid var(--line-bright); color: var(--text-dim); padding: 2px 6px; border-radius: var(--radius); margin-right: 4px; }
-  .product-meta { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
-  .product-price { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--copper-bright); }
-  .product-link { display: block; text-align: center; padding: 8px; border: 1px solid var(--line-bright); color: var(--text); text-decoration: none; font-size: 12px; margin-top: 10px; border-radius: var(--radius); }
-  .product-link:hover { background: var(--copper-dim); }
+:root{
+  --bg:#f4f5f8;
+  --surface:#ffffff;
+  --surface-2:#fafafd;
+  --ink:#171923;
+  --muted:#747887;
+  --faint:#a6a9b5;
+  --line:#e5e7ed;
+  --accent:#635bff;
+  --accent-2:#817bff;
+  --accent-soft:#efefff;
+  --success:#20a36a;
+  --shadow:0 18px 45px rgba(25,28,42,.08);
+  --shadow-sm:0 6px 20px rgba(25,28,42,.06);
+  --radius:18px;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:var(--sans);
+  color:var(--ink);
+  background:var(--bg);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.app-shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr}
+.sidebar{
+  position:sticky;top:0;height:100vh;
+  background:#171821;color:#fff;padding:28px 18px;
+  display:flex;flex-direction:column;
+}
+.side-brand{display:flex;align-items:center;gap:12px;padding:0 10px 34px}
+.brand-icon{width:34px;height:34px;border:1px solid rgba(255,255,255,.18);border-radius:10px;display:grid;place-items:center;grid-template-columns:repeat(3,4px);gap:3px}
+.brand-icon span{display:block;width:4px;height:15px;border-radius:4px;background:#fff}
+.brand-icon span:nth-child(2){height:22px;background:#817bff}
+.brand-icon span:nth-child(3){height:10px}
+.brand-name{font-size:14px;font-weight:700;letter-spacing:-.2px}
+.brand-sub{font-size:8px;letter-spacing:1.5px;color:#8e909c;margin-top:2px}
+.side-section{padding:0 4px;margin-bottom:28px}
+.side-label{font-size:9px;font-weight:700;letter-spacing:1.5px;color:#747783;padding:0 10px 10px}
+.side-item{height:42px;border-radius:10px;padding:0 11px;display:flex;align-items:center;gap:10px;color:#9b9da8;font-size:12px;margin-bottom:3px}
+.side-item.active{background:rgba(129,123,255,.13);color:#fff}
+.side-dot{width:6px;height:6px;border-radius:50%;background:#595b66}
+.side-item.active .side-dot{background:#817bff;box-shadow:0 0 12px rgba(129,123,255,.7)}
+.side-quick{width:100%;border:0;background:transparent;color:#aaaeba;padding:11px 10px;border-radius:10px;display:flex;align-items:center;justify-content:space-between;text-align:left;margin-bottom:3px}
+.side-quick:hover{background:rgba(255,255,255,.05);color:#fff}
+.side-quick span{font-size:12px}.side-quick small{font-size:10px;color:#777a86}
+.sidebar-footer{margin-top:auto;padding:14px 10px;border-top:1px solid rgba(255,255,255,.08);font-size:10px;color:#777a86;display:flex;align-items:center;gap:8px}
+.live-indicator{width:6px;height:6px;border-radius:50%;background:#35c884;box-shadow:0 0 10px rgba(53,200,132,.6)}
+.main-area{min-width:0;max-width:1300px;width:100%;margin:auto;padding:52px 6vw 90px}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:30px;margin-bottom:32px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--accent);margin-bottom:9px}
+h1{font-size:34px;line-height:1.12;letter-spacing:-1.4px;font-weight:750}
+.topbar p{font-size:13px;color:var(--muted);margin-top:9px;max-width:650px}
+.system-chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 12px;font-size:9px;font-weight:800;letter-spacing:1px;color:#686b77;white-space:nowrap;box-shadow:var(--shadow-sm)}
+.system-chip span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:6px}
+.search-workspace{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:25px;box-shadow:var(--shadow)}
+.search-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.search-number{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:800;display:grid;place-items:center}
+.section-title{font-size:15px;font-weight:750}.section-caption{font-size:11px;color:var(--muted);margin-top:2px}
+.primary-search{height:58px;display:flex;align-items:center;border:1px solid #dfe1e9;background:#fbfbfd;border-radius:14px;padding:5px 5px 5px 17px;transition:.2s}
+.primary-search:focus-within{border-color:#b8b4ff;box-shadow:0 0 0 4px rgba(99,91,255,.08)}
+.search-symbol{font-size:25px;line-height:1;color:#979aa7;margin-right:10px}
+input[type="text"],select.control-input{outline:none;color:var(--ink)}
+input[type="text"]{border:0;background:transparent}
+input[type="text"]::placeholder{color:#a5a8b2}
+.main-query-input{flex:1;min-width:0;font-size:14px;font-weight:500}
+button.search-btn{height:46px;padding:0 20px;border:0;border-radius:11px;background:var(--ink);color:#fff;font-size:12px;font-weight:750;transition:.2s}
+button.search-btn:hover{background:var(--accent)}
+button.search-btn:disabled{opacity:.5;cursor:default}
+button.search-btn span{font-size:17px;margin-left:8px}
+.filter-heading{font-size:9px;letter-spacing:1.6px;font-weight:800;color:#9b9eaa;margin:24px 0 10px}
+.filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.filter-card{border:1px solid var(--line);background:var(--surface-2);border-radius:13px;padding:11px 12px 10px}
+.filter-card label{display:block;font-size:9px;font-weight:750;color:#818491;margin-bottom:7px}
+select.control-input,input.control-input{
+  width:100%;height:30px;border:0;background:transparent;font-size:11px;font-weight:600;padding:0
+}
+select.control-input{appearance:auto;cursor:pointer}
+.query-preview{margin-top:17px;padding-top:14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:9px;min-width:0}
+.preview-label{font-size:8px;letter-spacing:1.4px;font-weight:800;color:#9a9da8}
+#previewText{font-size:11px;color:var(--accent);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quick-strip{display:flex;align-items:center;gap:14px;margin:16px 2px 30px}
+.quick-label{font-size:10px;color:#999ca7;white-space:nowrap}
+.quick-parts{display:flex;flex-wrap:wrap;gap:7px}
+.quick-part{border:1px solid var(--line);background:#fff;color:#626572;padding:7px 11px;border-radius:999px;font-size:10px;box-shadow:0 2px 7px rgba(25,28,42,.03)}
+.quick-part:hover{border-color:#c7c4ff;color:var(--accent);background:#fbfbff}
+.quick-part b{font-weight:700;color:#a0a2ad;margin-left:4px}
+.status-panel{display:none;background:#fff;border:1px solid var(--line);border-radius:18px;margin-bottom:28px;overflow:hidden;box-shadow:var(--shadow-sm)}
+.status-header{display:flex;justify-content:space-between;align-items:center;padding:17px 20px;background:#fafafd}
+.status-header-left{display:flex;align-items:center;gap:11px;font-size:12px}
+.status-kicker,.results-kicker{font-size:8px;letter-spacing:1.5px;font-weight:800;color:#9a9da8;margin-bottom:3px}
+.status-spinner{width:8px;height:8px;border-radius:50%;background:#e5a83e}
+.status-spinner.pulsing{animation:pulse 1.1s ease-in-out infinite}
+.status-spinner.done{background:var(--success)}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+.status-count{font-size:10px;color:var(--muted)}
+.status-grid{border-top:1px solid var(--line)}
+.site-row{display:flex;align-items:center;justify-content:space-between;padding:11px 20px;font-size:11px;border-bottom:1px solid var(--line)}
+.site-row:last-child{border-bottom:none}
+.site-name{display:flex;align-items:center;gap:9px}.site-dot{width:6px;height:6px;border-radius:50%;background:#c5c7cf}
+.site-dot.searching{background:#e5a83e;animation:pulse 1.1s ease-in-out infinite}
+.site-dot.available{background:var(--success)}.site-dot.unavailable{background:#e06767}
+.site-status{color:#8d909b;font-size:10px}
+.controls-bar{display:none;justify-content:space-between;align-items:center;margin-bottom:14px;padding:0 2px}
+#resultsCount{font-size:11px;color:var(--muted)}#resultsCount strong{color:var(--ink)}
+.results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:13px}
+.product-card{position:relative;min-height:190px;border:1px solid var(--line);border-radius:17px;padding:18px;background:#fff;display:flex;flex-direction:column;box-shadow:0 5px 18px rgba(25,28,42,.035);transition:transform .2s,box-shadow .2s,border-color .2s}
+.product-card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:#d6d4ff}
+.product-card:before{content:"";position:absolute;left:18px;top:18px;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.product-title{font-size:13px;font-weight:750;line-height:1.4;padding-left:17px;margin-bottom:14px}
+.product-meta{margin-top:auto;padding-top:13px;border-top:1px solid var(--line)}
+.product-price{font-size:17px;font-weight:800;color:var(--ink)}
+.product-meta>div[style]{font-size:9px!important;color:#8b8e99!important;margin-top:3px}
+.product-link{display:block;text-align:center;text-decoration:none;padding:9px;border:1px solid #dfe1e8;color:#555865;background:#fafafd;font-size:10px;font-weight:700;margin-top:11px;border-radius:9px}
+.product-link:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+@media(max-width:1000px){.filter-grid{grid-template-columns:repeat(2,1fr)}.main-area{padding:38px 4vw 70px}}
+@media(max-width:720px){
+  .app-shell{display:block}.sidebar{display:none}.main-area{padding:28px 18px 55px}
+  .topbar{margin-bottom:22px}.topbar h1{font-size:28px}.system-chip{display:none}
+  .search-workspace{padding:17px;border-radius:18px}.primary-search{height:auto;min-height:54px}
+  .search-symbol{display:none}.main-query-input{padding:0 8px}
+  button.search-btn{padding:0 13px}.filter-grid{grid-template-columns:1fr}
+  .quick-strip{align-items:flex-start;flex-direction:column;gap:8px;margin-bottom:23px}
+  .results-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
-
-<div class="container">
-
-  <div class="brand">
-    <div class="brand-mark"><span class="dot"></span></div>
-    <h1>Component Finder</h1>
-  </div>
-  <p class="tagline">Search live inventory using target part numbers and parametric electrical specifications.</p>
-
-  <!-- PARAMETRIC INPUT FORM -->
-  <form class="search-panel" id="searchForm" onsubmit="event.preventDefault(); startSearch();">
-    
-    <div class="search-row-main">
-      <input type="text" id="queryInput" class="main-query-input" placeholder="Part name or family (e.g. ESP32, LM2596, Capacitor)" required oninput="updateQueryPreview()">
-      <button type="submit" class="search-btn" id="searchBtn">Search Parts</button>
-    </div>
-
-    <!-- SPECIFICATIONS FILTER SECTION INSIDE INPUT -->
-    <div class="specs-grid">
-      <div class="spec-field">
-        <label for="specMount">Mount Type</label>
-        <select id="specMount" class="control-input" onchange="updateQueryPreview()">
-          <option value="">Any Mount</option>
-          <option value="SMD">SMD / SMT</option>
-          <option value="DIP">Through Hole (DIP)</option>
-        </select>
-      </div>
-
-      <div class="spec-field">
-        <label for="specVoltage">Voltage</label>
-        <select id="specVoltage" class="control-input" onchange="updateQueryPreview()">
-          <option value="">Any Voltage</option>
-          <option value="3.3V">3.3V</option>
-          <option value="5V">5V</option>
-          <option value="12V">12V</option>
-          <option value="24V">24V</option>
-        </select>
-      </div>
-
-      <div class="spec-field">
-        <label for="specCurrent">Current Rating</label>
-        <input type="text" id="specCurrent" class="control-input" placeholder="e.g. 1A, 500mA" oninput="updateQueryPreview()">
-      </div>
-
-      <div class="spec-field">
-        <label for="specPackage">Package / Footprint</label>
-        <input type="text" id="specPackage" class="control-input" placeholder="e.g. SOP-8, TO-220, 0805" oninput="updateQueryPreview()">
-      </div>
-
-      <div class="spec-field">
-        <label for="specOther">Other Spec</label>
-        <input type="text" id="specOther" class="control-input" placeholder="e.g. 16MB, Adjustable" oninput="updateQueryPreview()">
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="brand-icon"><span></span><span></span><span></span></div>
+      <div>
+        <div class="brand-name">Component Finder</div>
+        <div class="brand-sub">PARAMETRIC SEARCH</div>
       </div>
     </div>
 
-    <div class="query-preview" id="queryPreview">
-      <span>Target Query:</span> <strong id="previewText">—</strong>
+    <div class="side-section">
+      <div class="side-label">SEARCH TOOLS</div>
+      <div class="side-item active"><span class="side-dot"></span>Parts Search</div>
+      <div class="side-item"><span class="side-dot"></span>Live Inventory</div>
+      <div class="side-item"><span class="side-dot"></span>Specifications</div>
     </div>
 
-  </form>
+    <div class="side-section">
+      <div class="side-label">QUICK PARTS</div>
+      <button type="button" class="side-quick" onclick="applyQuick('ESP32', '', '3.3V', '', '')">
+        <span>ESP32</span><small>3.3V</small>
+      </button>
+      <button type="button" class="side-quick" onclick="applyQuick('LM2596', 'DIP', '', '3A', '')">
+        <span>LM2596</span><small>3A</small>
+      </button>
+      <button type="button" class="side-quick" onclick="applyQuick('Resistor', 'SMD', '', '', '0805')">
+        <span>Resistor</span><small>0805</small>
+      </button>
+    </div>
 
-  <div class="quick-parts">
-    <button type="button" class="quick-part" onclick="applyQuick('ESP32', '', '3.3V', '', '')">ESP32 (3.3V)</button>
-    <button type="button" class="quick-part" onclick="applyQuick('LM2596', 'DIP', '', '3A', '')">LM2596 (3A Step-Down)</button>
-    <button type="button" class="quick-part" onclick="applyQuick('Resistor', 'SMD', '', '', '0805')">0805 SMD Resistor</button>
-  </div>
+    <div class="sidebar-footer">
+      <span class="live-indicator"></span>
+      Live distributor search
+    </div>
+  </aside>
 
-  <!-- STATUS PANEL -->
-  <div id="statusPanel" class="status-panel">
-    <div class="status-header">
-      <div class="status-header-left">
-        <span class="status-spinner pulsing" id="statusSpinner"></span>
-        <span id="statusHeadline">Searching Indian distributors...</span>
+  <main class="main-area">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">COMPONENT INTELLIGENCE</div>
+        <h1>Find the right part.</h1>
+        <p>Search distributor inventory with part names, electrical ratings, packages, and specifications.</p>
       </div>
-      <span id="statusCount" style="font-family:var(--mono); font-size:12px; color:var(--text-dim);"></span>
+      <div class="system-chip"><span></span> LIVE SEARCH</div>
+    </header>
+
+    <form class="search-workspace" id="searchForm" onsubmit="event.preventDefault(); startSearch();">
+      <div class="search-head">
+        <div class="search-number">01</div>
+        <div>
+          <div class="section-title">Build your search</div>
+          <div class="section-caption">Enter a part or combine it with technical constraints.</div>
+        </div>
+      </div>
+
+      <div class="primary-search">
+        <div class="search-symbol">⌕</div>
+        <input type="text" id="queryInput" class="main-query-input" placeholder="ESP32, LM2596, Capacitor..." required oninput="updateQueryPreview()">
+        <button type="submit" class="search-btn" id="searchBtn">Search Parts <span>→</span></button>
+      </div>
+
+      <div class="filter-heading">PARAMETERS</div>
+      <div class="filter-grid">
+        <div class="filter-card">
+          <label for="specMount">Mount Type</label>
+          <select id="specMount" class="control-input" onchange="updateQueryPreview()">
+            <option value="">Any Mount</option>
+            <option value="SMD">SMD / SMT</option>
+            <option value="DIP">Through Hole (DIP)</option>
+          </select>
+        </div>
+
+        <div class="filter-card">
+          <label for="specVoltage">Voltage</label>
+          <select id="specVoltage" class="control-input" onchange="updateQueryPreview()">
+            <option value="">Any Voltage</option>
+            <option value="3.3V">3.3V</option>
+            <option value="5V">5V</option>
+            <option value="12V">12V</option>
+            <option value="24V">24V</option>
+          </select>
+        </div>
+
+        <div class="filter-card">
+          <label for="specCurrent">Current Rating</label>
+          <input type="text" id="specCurrent" class="control-input" placeholder="1A, 500mA" oninput="updateQueryPreview()">
+        </div>
+
+        <div class="filter-card">
+          <label for="specPackage">Package / Footprint</label>
+          <input type="text" id="specPackage" class="control-input" placeholder="SOP-8, TO-220, 0805" oninput="updateQueryPreview()">
+        </div>
+
+        <div class="filter-card">
+          <label for="specOther">Other Spec</label>
+          <input type="text" id="specOther" class="control-input" placeholder="16MB, Adjustable" oninput="updateQueryPreview()">
+        </div>
+      </div>
+
+      <div class="query-preview" id="queryPreview">
+        <span class="preview-label">QUERY</span>
+        <strong id="previewText">—</strong>
+      </div>
+    </form>
+
+    <div class="quick-strip">
+      <span class="quick-label">Try a quick search</span>
+      <div class="quick-parts">
+        <button type="button" class="quick-part" onclick="applyQuick('ESP32', '', '3.3V', '', '')">ESP32 <b>3.3V</b></button>
+        <button type="button" class="quick-part" onclick="applyQuick('LM2596', 'DIP', '', '3A', '')">LM2596 <b>3A</b></button>
+        <button type="button" class="quick-part" onclick="applyQuick('Resistor', 'SMD', '', '', '0805')">Resistor <b>0805</b></button>
+      </div>
     </div>
-    <div id="statusGrid" class="status-grid"></div>
-  </div>
 
-  <!-- RESULTS -->
-  <div id="controlsBar" class="controls-bar">
-    <div id="resultsCount" style="font-size:13px; color:var(--text-dim);"></div>
-  </div>
+    <section id="statusPanel" class="status-panel">
+      <div class="status-header">
+        <div class="status-header-left">
+          <span class="status-spinner pulsing" id="statusSpinner"></span>
+          <div>
+            <div class="status-kicker">DISTRIBUTOR NETWORK</div>
+            <span id="statusHeadline">Searching Indian distributors...</span>
+          </div>
+        </div>
+        <span id="statusCount" class="status-count"></span>
+      </div>
+      <div id="statusGrid" class="status-grid"></div>
+    </section>
 
-  <div id="results" class="results-grid"></div>
-
+    <section class="results-section">
+      <div id="controlsBar" class="controls-bar">
+        <div>
+          <div class="results-kicker">SEARCH RESULTS</div>
+          <div id="resultsCount"></div>
+        </div>
+      </div>
+      <div id="results" class="results-grid"></div>
+    </section>
+  </main>
 </div>
-
 <script>
 let evtSource = null;
 let allProducts = [];
@@ -407,7 +397,7 @@ function renderProducts() {
       <div class="product-title">${product.title}</div>
       <div class="product-meta">
         <div class="product-price">${product.price}</div>
-        <div style="font-size:11px; color:var(--text-dim);">${product.site}</div>
+        <div style="font-size:10px; color:var(--text-dim);">${product.site}</div>
         <a href="${product.link}" target="_blank" rel="noopener" class="product-link">View Listing</a>
       </div>
     `;
@@ -415,6 +405,5 @@ function renderProducts() {
   });
 }
 </script>
-
 </body>
 </html>
