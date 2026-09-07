@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, Response
 from flask_cors import CORS
+import concurrent.futures
 
 app = Flask(__name__)
 CORS(app)
@@ -21,11 +22,10 @@ def index():
 # --- SCRAPER IMPLEMENTATIONS ---
 
 def scrape_woocommerce(site_name, base_url, query):
-    """Scrapes standard WooCommerce stores like Robu and Sharvi"""
     products = []
     try:
         url = f"{base_url}/?s={query}&post_type=product"
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp = requests.get(url, headers=HEADERS, timeout=5)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.select(".product, .product-grid-item, li.type-product, .product-small")
@@ -43,11 +43,10 @@ def scrape_woocommerce(site_name, base_url, query):
     return products
 
 def scrape_shopify(site_name, base_url, query):
-    """Queries Shopify native JSON predictive search API"""
     products = []
     try:
         url = f"{base_url}/search/suggest.json?q={query}&resources[type]=product&resources[limit]=4"
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp = requests.get(url, headers=HEADERS, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
             items = data.get("resources", {}).get("results", {}).get("products", [])
@@ -62,11 +61,10 @@ def scrape_shopify(site_name, base_url, query):
     return products
 
 def scrape_opencart(site_name, base_url, query):
-    """Scrapes OpenCart platforms like Leeds Electronics & ElectronicsComp"""
     products = []
     try:
         url = f"{base_url}/index.php?route=product/search&search={query}"
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp = requests.get(url, headers=HEADERS, timeout=5)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.select(".product-layout, .product-thumb")
@@ -83,11 +81,10 @@ def scrape_opencart(site_name, base_url, query):
     return products
 
 def scrape_evelta(query):
-    """Scrapes Evelta Electronics search endpoint"""
     products = []
     try:
         url = f"https://www.evelta.com/index.php?subcats=Y&pcode_from_q=Y&pshort=Y&pfull=Y&pname=Y&pkeywords=Y&search_performed=Y&q={query}&dispatch=products.search"
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp = requests.get(url, headers=HEADERS, timeout=5)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.select(".ty-column4, .ty-grid-list__item")
@@ -102,6 +99,17 @@ def scrape_evelta(query):
     except Exception as e:
         print(f"Error scraping Evelta: {e}")
     return products
+
+
+def fetch_site_data(target, query):
+    """Worker function for parallel execution"""
+    site_name = target["name"]
+    products = target["func"](query)
+    return {
+        "site": site_name,
+        "count": len(products),
+        "products": products
+    }
 
 
 @app.route("/api/search")
@@ -125,25 +133,27 @@ def search():
             {"name": "DNK Technologies", "func": lambda q: scrape_shopify("DNK Technologies", "https://dnktech.in", q)}
         ]
 
-        # Send target website list to frontend UI
+        # 1. Send all sites to frontend UI immediately
         site_names = [t["name"] for t in targets]
         yield f"data: {json.dumps({'type': 'init', 'sites': site_names})}\n\n"
         
-        for target in targets:
-            site_name = target["name"]
+        # 2. Mark all sites as "searching..." simultaneously
+        for name in site_names:
+            yield f"data: {json.dumps({'type': 'status', 'site': name, 'state': 'searching'})}\n\n"
+
+        # 3. Execute queries in parallel using 9 threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as executor:
+            future_to_target = {executor.submit(fetch_site_data, target, query): target for target in targets}
             
-            # Emit "Searching..." status badge
-            yield f"data: {json.dumps({'type': 'status', 'site': site_name, 'state': 'searching'})}\n\n"
-            
-            # Execute scraper function
-            products = target["func"](query)
-            count = len(products)
-            
-            # Emit "Available (count)" or "Not Available" badge
-            yield f"data: {json.dumps({'type': 'status', 'site': site_name, 'state': 'done', 'count': count})}\n\n"
-            
-            # Stream card data to UI
-            yield f"data: {json.dumps({'type': 'result', 'site': site_name, 'products': products})}\n\n"
+            # Stream results back to frontend as soon as EACH individual request completes
+            for future in concurrent.futures.as_completed(future_to_target):
+                result = future.result()
+                
+                # Emit status state (Available vs Not Available) immediately
+                yield f"data: {json.dumps({'type': 'status', 'site': result['site'], 'state': 'done', 'count': result['count']})}\n\n"
+                
+                # Stream found products immediately
+                yield f"data: {json.dumps({'type': 'result', 'site': result['site'], 'products': result['products']})}\n\n"
             
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
