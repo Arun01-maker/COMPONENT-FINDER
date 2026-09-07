@@ -343,8 +343,8 @@ function startSearch() {
   if (evtSource) evtSource.close();
 
   // Send the query with parameters included
-  const backendUrl = `https://component-finder.onrender.com/api/search?q=${encodeURIComponent(fullQuery)}`;
-  evtSource = new EventSource(backendUrl);
+const backendUrl = `https://your-python-app.onrender.com/api/search?q=${encodeURIComponent(fullQuery)}`;
+evtSource = new EventSource(backendUrl);
 
   evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
