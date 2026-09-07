@@ -187,6 +187,58 @@
   }
   .quick-part:hover { border-color: var(--copper-dim); color: var(--text); }
 
+  /* ---------- Filter Bar Panel ---------- */
+  .filter-panel {
+    display: none;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .filter-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--copper-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .filter-group label {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  select.control-select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line-bright);
+    padding: 6px 22px 6px 8px;
+    font-size: 12px;
+    font-family: var(--mono);
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    border-radius: var(--radius);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238ba392'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+  }
+
   /* ---------- Empty state ---------- */
   .empty-state {
     text-align: center;
@@ -287,22 +339,6 @@
   .results-count { font-size: 13px; color: var(--text-dim); }
   .results-count strong { color: var(--text); font-weight: 600; }
 
-  select.control-select {
-    background: transparent;
-    color: var(--text);
-    border: none;
-    border-bottom: 1px solid var(--line-bright);
-    padding: 4px 22px 4px 2px;
-    font-size: 13px;
-    font-family: var(--mono);
-    outline: none;
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238ba392'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 2px center;
-  }
-
   /* ---------- Product grid ---------- */
   .results-grid {
     display: grid;
@@ -335,11 +371,27 @@
     font-size: 14px;
     font-weight: 500;
     line-height: 1.45;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .spec-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .spec-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--bg);
+    border: 1px solid var(--line-bright);
+    color: var(--text-dim);
+    padding: 2px 6px;
+    border-radius: var(--radius);
   }
 
   .product-meta {
@@ -380,50 +432,11 @@
     .status-spinner, .site-dot, .status-spinner.pulsing { animation: none !important; }
   }
 
-  /* ---------- Responsive ---------- */
-  @media (max-width: 768px) {
-    body { padding: 32px 16px 60px; }
-    .results-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-  }
-
   @media (max-width: 600px) {
     body { padding: 24px 14px 48px; }
-    h1 { font-size: 19px; }
-    header p.tagline { font-size: 13px; margin-bottom: 28px; }
-
-    .search-panel { padding: 16px; }
     .search-row { flex-direction: column; }
     button.search-btn { width: 100%; }
-    input[type="text"] { font-size: 16px; } /* avoid iOS zoom-on-focus */
-
-    .quick-parts {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      margin: 12px -14px 28px;
-      padding: 0 14px 4px;
-      scrollbar-width: none;
-    }
-    .quick-parts::-webkit-scrollbar { display: none; }
-    .quick-part { flex-shrink: 0; }
-
-    .status-header { padding: 11px 14px; flex-wrap: wrap; row-gap: 6px; }
-    .status-header-left { font-size: 12px; }
-    .site-row { padding: 10px 14px; font-size: 12px; }
-
-    .error-banner { flex-direction: column; align-items: flex-start; }
-    .error-banner button { align-self: flex-start; }
-
-    .controls-bar { flex-direction: column; align-items: flex-start; gap: 8px; }
-    select.control-select { width: 100%; }
-
     .results-grid { grid-template-columns: 1fr; }
-
-    .empty-state { padding: 48px 16px; }
-  }
-
-  @media (max-width: 360px) {
-    .brand { gap: 10px; }
-    h1 { font-size: 17px; }
   }
 </style>
 </head>
@@ -455,6 +468,43 @@
   <div class="error-banner" id="errorBanner">
     <span>Something interrupted the search. The backend may be waking up or unreachable.</span>
     <button onclick="startSearch()">Retry</button>
+  </div>
+
+  <!-- Parametric Filter Panel -->
+  <div id="filterPanel" class="filter-panel">
+    <div class="filter-title">
+      <span>Parametric Filters</span>
+      <button type="button" onclick="resetFilters()" style="background:none; border:none; color:var(--text-dim); font-size:11px; cursor:pointer;">Reset Filters</button>
+    </div>
+    <div class="filter-grid">
+      <div class="filter-group">
+        <label for="filterMount">Mount Type</label>
+        <select id="filterMount" class="control-select" onchange="renderProducts()">
+          <option value="all">All Mount Types</option>
+          <option value="SMD/SMT">SMD / SMT</option>
+          <option value="Through Hole">Through Hole</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filterPackage">Package / Footprint</label>
+        <select id="filterPackage" class="control-select" onchange="renderProducts()">
+          <option value="all">All Packages</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filterVoltage">Voltage</label>
+        <select id="filterVoltage" class="control-select" onchange="renderProducts()">
+          <option value="all">All Voltages</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filterSpecKeyword">Specification Search</label>
+        <input type="text" id="filterSpecKeyword" placeholder="e.g. 5V, 2A, SOP-8" oninput="renderProducts()" style="padding: 6px 8px; font-size: 12px;">
+      </div>
+    </div>
   </div>
 
   <div id="statusPanel" class="status-panel">
@@ -541,6 +591,39 @@ function showError(show) {
   document.getElementById('errorBanner').style.display = show ? 'flex' : 'none';
 }
 
+function resetFilters() {
+  document.getElementById('filterMount').value = 'all';
+  document.getElementById('filterPackage').value = 'all';
+  document.getElementById('filterVoltage').value = 'all';
+  document.getElementById('filterSpecKeyword').value = '';
+  renderProducts();
+}
+
+function populateFilterDropdowns() {
+  const pkgSelect = document.getElementById('filterPackage');
+  const voltSelect = document.getElementById('filterVoltage');
+
+  const packages = new Set();
+  const voltages = new Set();
+
+  allProducts.forEach(p => {
+    if (p.specs) {
+      if (p.specs.package && p.specs.package !== 'Generic') packages.add(p.specs.package);
+      if (p.specs.voltage && p.specs.voltage !== 'N/A') voltages.add(p.specs.voltage);
+    }
+  });
+
+  pkgSelect.innerHTML = '<option value="all">All Packages</option>';
+  packages.forEach(pkg => {
+    pkgSelect.innerHTML += `<option value="${pkg}">${pkg}</option>`;
+  });
+
+  voltSelect.innerHTML = '<option value="all">All Voltages</option>';
+  voltages.forEach(v => {
+    voltSelect.innerHTML += `<option value="${v}">${v}</option>`;
+  });
+}
+
 function startSearch() {
   const query = document.getElementById('queryInput').value.trim();
   if (!query) return;
@@ -549,6 +632,7 @@ function startSearch() {
   const statusPanel = document.getElementById('statusPanel');
   const statusGrid = document.getElementById('statusGrid');
   const controlsBar = document.getElementById('controlsBar');
+  const filterPanel = document.getElementById('filterPanel');
   const emptyState = document.getElementById('emptyState');
 
   allProducts = [];
@@ -559,6 +643,7 @@ function startSearch() {
   statusPanel.classList.remove('collapsed');
   statusPanel.style.display = 'block';
   controlsBar.style.display = 'none';
+  filterPanel.style.display = 'none';
   emptyState.style.display = 'none';
   showError(false);
   setSearching(true);
@@ -620,6 +705,8 @@ function startSearch() {
           allProducts.push({ ...p, site: data.site, parsedPrice: parsePrice(p.price) });
         });
         controlsBar.style.display = 'flex';
+        filterPanel.style.display = 'block';
+        populateFilterDropdowns();
         renderProducts();
       }
     }
@@ -654,7 +741,19 @@ function renderProducts() {
   const resultsCount = document.getElementById('resultsCount');
   const sortValue = document.getElementById('sortSelect').value;
 
-  let displayProducts = [...allProducts];
+  const selectedMount = document.getElementById('filterMount').value;
+  const selectedPackage = document.getElementById('filterPackage').value;
+  const selectedVoltage = document.getElementById('filterVoltage').value;
+  const keyword = document.getElementById('filterSpecKeyword').value.toLowerCase().trim();
+
+  let displayProducts = allProducts.filter(p => {
+    if (selectedMount !== 'all' && p.specs && p.specs.mount !== selectedMount) return false;
+    if (selectedPackage !== 'all' && p.specs && p.specs.package !== selectedPackage) return false;
+    if (selectedVoltage !== 'all' && p.specs && p.specs.voltage !== selectedVoltage) return false;
+    if (keyword && !p.title.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+
   if (sortValue === 'price-low') displayProducts.sort((a, b) => a.parsedPrice - b.parsedPrice);
   else if (sortValue === 'price-high') displayProducts.sort((a, b) => b.parsedPrice - a.parsedPrice);
 
@@ -664,8 +763,20 @@ function renderProducts() {
   displayProducts.forEach(product => {
     const card = document.createElement('div');
     card.className = 'product-card';
+
+    const mountTag = product.specs ? `<span class="spec-badge">${product.specs.mount}</span>` : '';
+    const pkgTag = (product.specs && product.specs.package !== 'Generic') ? `<span class="spec-badge">${product.specs.package}</span>` : '';
+    const voltTag = (product.specs && product.specs.voltage !== 'N/A') ? `<span class="spec-badge">${product.specs.voltage}</span>` : '';
+    const currTag = (product.specs && product.specs.current !== 'N/A') ? `<span class="spec-badge">${product.specs.current}</span>` : '';
+
     card.innerHTML = `
       <div class="product-title">${product.title}</div>
+      <div class="spec-tags">
+        ${mountTag}
+        ${pkgTag}
+        ${voltTag}
+        ${currTag}
+      </div>
       <div class="product-meta">
         <div class="product-price">${product.price}</div>
         <div class="product-vendor">${product.site}</div>
