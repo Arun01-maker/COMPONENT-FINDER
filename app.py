@@ -35,12 +35,12 @@ def scrape_site(site_config, query):
                     title = title_el.get_text(strip=True)
                     price = price_el.get_text(strip=True) if price_el else "Check Site"
                     
-                    # Ensure price format is clean
+                    # Clean up price string formatting
                     price = price.replace("Regular price", "").replace("Sale price", "").strip()
                     if not price.startswith("₹") and "Rs." not in price and any(c.isdigit() for c in price):
                         price = "₹" + price
                     
-                    # Handle full/relative URLs
+                    # Resolve full / relative links
                     link = url
                     if link_el:
                         href = link_el.get("href", "")
@@ -68,7 +68,7 @@ def search():
             yield f"data: {json.dumps({'type': 'error', 'message': 'No query provided'})}\n\n"
             return
 
-        # Target 7 Distributors Configuration
+        # Target Distributors Configuration
         sites = [
             {
                 "name": "Robu.in",
@@ -138,7 +138,16 @@ def search():
         yield f"data: {json.dumps({'type': 'meta', 'total': len(sites)})}\n\n"
         
         for site in sites:
+            # Send status event before checking
+            yield f"data: {json.dumps({'type': 'status', 'site': site['name'], 'state': 'checking', 'message': f'Checking {site[\"name\"]}...'})}\n\n"
+            
             result = scrape_site(site, query)
+            count = len(result.get("products", []))
+            
+            # Send status event after checking
+            yield f"data: {json.dumps({'type': 'status', 'site': site['name'], 'state': 'done', 'count': count, 'message': f'{site[\"name\"]}: {count} products found'})}\n\n"
+            
+            # Stream the products payload
             yield f"data: {json.dumps(result)}\n\n"
             
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
