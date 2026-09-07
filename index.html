@@ -613,7 +613,7 @@
       extra: extraEl.value.trim(),
     });
 
-    const source = new EventSource('/api/search?' + params.toString());
+    const source = new EventSource('https://component-finder.onrender.com/api/search?' + params.toString());
     currentSource = source;
 
     source.onmessage = (event) => {
