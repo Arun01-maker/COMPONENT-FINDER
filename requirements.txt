@@ -1,6 +1,5 @@
-Flask
-camoufox[geojson]
-playwright
-requests
+fastapi
+uvicorn
+httpx
 beautifulsoup4
-gunicorn
+camoufox
