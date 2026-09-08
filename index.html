@@ -11,7 +11,7 @@
         <h1 class="text-3xl font-bold mb-6">Component Finder</h1>
         
         <div class="flex gap-4 mb-8">
-            <input id="searchInput" type="text" value="LM7805" placeholder="Enter part name..." 
+            <input id="searchInput" type="text" value="78L10" placeholder="Enter part name..." 
                    class="flex-1 p-3 rounded bg-slate-800 text-white border border-slate-700 focus:outline-none focus:border-blue-500">
             <button id="searchBtn" onclick="startSearch()" class="bg-blue-600 px-6 py-3 rounded font-bold hover:bg-blue-500">
                 Search Parts →
@@ -43,7 +43,9 @@
 
             try {
                 const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-                if (!response.ok) throw new Error("Search failed");
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
 
                 const data = await response.json();
                 
@@ -56,8 +58,8 @@
                     statusText.textContent = "No products found for this query.";
                 }
             } catch (err) {
-                console.error(err);
-                statusText.textContent = "Error fetching search results. Please try again.";
+                console.error("Search fetch failed:", err);
+                statusText.textContent = `Error: ${err.message}. Please try again.`;
                 statusBox.classList.remove('text-yellow-400');
                 statusBox.classList.add('text-red-400');
             } finally {
