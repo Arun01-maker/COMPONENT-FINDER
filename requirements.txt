@@ -1,6 +1,6 @@
-fastapi
-uvicorn[standard]
-httpx
-beautifulsoup4
-camoufox
+Flask
+camoufox[geojson]
 playwright
+requests
+beautifulsoup4
+gunicorn
