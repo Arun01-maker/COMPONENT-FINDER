@@ -2,4 +2,4 @@ fastapi
 uvicorn[standard]
 httpx
 beautifulsoup4
-camufox
+camoufox
