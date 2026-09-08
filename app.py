@@ -1,62 +1,23 @@
-# ============================================================
-# COMPONENT FINDER - MULTI WEBSITE BACKEND
-# ============================================================
-#
-# FastAPI + SSE
-# HTTP scraping first
-# Camoufox browser fallback
-#
-# Supported websites:
-#   1. ET Store
-#   2. Robu.in
-#   3. element14
-#   4. Leeds Electronics
-#   5. Tomson Electronics
-#   6. Sparefly
-#   7. Sharvi Electronics
-#   8. ElectronicsComp
-#   9. QuartzComponents
-#  10. Evelta
-#  11. MakerBazar
-#  12. Probots
-#
-# Existing frontend can continue using:
-#   /api/search?q=LM2596
-#
-# ============================================================
-
-import asyncio
 import json
 import re
-from urllib.parse import quote_plus, urljoin, quote
+import asyncio
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-
-# ============================================================
-# OPTIONAL CAMOUFOX
-# ============================================================
 
 try:
     from camoufox.async_api import AsyncCamoufox
     CAMOUFOX_AVAILABLE = True
 except Exception:
-    AsyncCamoufox = None
     CAMOUFOX_AVAILABLE = False
 
 
-# ============================================================
-# FASTAPI
-# ============================================================
+app = FastAPI(title="Component Finder API")
 
-app = FastAPI(
-    title="Component Finder",
-    version="3.0"
-)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,14 +29,87 @@ app.add_middleware(
 
 
 # ============================================================
-# SETTINGS
+# DISTRIBUTOR CONFIGURATION
 # ============================================================
 
-HTTP_TIMEOUT = 12.0
-BROWSER_TIMEOUT = 18_000
+DISTRIBUTORS = [
+    {
+        "name": "ET Store",
+        "search_url": lambda q:
+            f"https://etstore.in/index.php?route=product/search&search={quote_plus(q)}",
+    },
 
-MAX_PRODUCTS_PER_SITE = 25
-MAX_BROWSER_PRODUCTS = 12
+    {
+        "name": "Robu.in",
+        "search_url": lambda q:
+            f"https://robu.in/?s={quote_plus(q)}&post_type=product",
+    },
+
+    {
+        "name": "element14",
+        "search_url": lambda q:
+            f"https://in.element14.com/search?st={quote_plus(q)}",
+    },
+
+    {
+        "name": "Leeds Electronics",
+        "search_url": lambda q:
+            f"https://www.leedsind.com/search?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "Tomson Electronics",
+        "search_url": lambda q:
+            f"https://www.tomsonelectronics.com/search?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "Sparefly",
+        "search_url": lambda q:
+            f"https://sparefly.com/search?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "Sharvi Electronics",
+        "search_url": lambda q:
+            f"https://sharvielectronics.com/?s={quote_plus(q)}",
+    },
+
+    {
+        "name": "ElectronicsComp",
+        "search_url": lambda q:
+            f"https://www.electronicscomp.com/catalogsearch/result/?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "QuartzComponents",
+        "search_url": lambda q:
+            f"https://quartzcomponents.com/search?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "Evelta",
+        "search_url": lambda q:
+            f"https://evelta.com/catalogsearch/result/?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "MakerBazar",
+        "search_url": lambda q:
+            f"https://makerbazar.in/search?q={quote_plus(q)}",
+    },
+
+    {
+        "name": "Probots",
+        "search_url": lambda q:
+            f"https://probots.co.in/search?q={quote_plus(q)}",
+    },
+]
+
+
+# ============================================================
+# HELPERS
+# ============================================================
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -83,1244 +117,474 @@ USER_AGENT = (
     "Chrome/140.0.0.0 Safari/537.36"
 )
 
-HEADERS = {
-    "User-Agent": USER_AGENT,
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,*/*;q=0.8"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-}
 
-
-# ============================================================
-# STORE DEFINITIONS
-# ============================================================
-
-STORES = [
-    {
-        "name": "ET Store",
-        "type": "generic",
-        "search": lambda q: (
-            f"https://etstore.in/index.php?"
-            f"route=product/search&search={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Robu.in",
-        "type": "robu",
-        "search": lambda q: (
-            f"https://robu.in/?s={quote_plus(q)}&post_type=product"
-        ),
-    },
-
-    {
-        "name": "element14",
-        "type": "element14",
-        "search": lambda q: (
-            f"https://in.element14.com/search?st={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Leeds Electronics",
-        "type": "generic",
-        "search": lambda q: (
-            f"https://www.leedsind.com/?s={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Tomson Electronics",
-        "type": "tomson",
-        "search": lambda q: (
-            f"https://www.tomsonelectronics.com/search?q={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Sparefly",
-        "type": "generic",
-        "search": lambda q: (
-            f"https://sparefly.com/?s={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Sharvi Electronics",
-        "type": "generic",
-        "search": lambda q: (
-            f"https://www.google.com/search?q="
-            f"site%3Aamazon.in+%22Sharvi+Electronics%22+"
-            f"{quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "ElectronicsComp.com",
-        "type": "generic",
-        "search": lambda q: (
-            f"https://www.electronicscomp.com/"
-            f"index.php?route=product/search&search={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "QuartzComponents",
-        "type": "shopify",
-        "search": lambda q: (
-            f"https://quartzcomponents.com/search?q={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Evelta",
-        "type": "evelta",
-        "search": lambda q: (
-            f"https://evelta.com/search?q={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "MakerBazar",
-        "type": "shopify",
-        "search": lambda q: (
-            f"https://makerbazar.in/search?q={quote_plus(q)}"
-        ),
-    },
-
-    {
-        "name": "Probots",
-        "type": "probots",
-        "search": lambda q: (
-            f"https://probots.co.in/catalogsearch/result/"
-            f"?q={quote_plus(q)}"
-        ),
-    },
-]
-
-
-# ============================================================
-# TEXT HELPERS
-# ============================================================
-
-def clean_text(value):
-    if not value:
+def normalize(text):
+    if not text:
         return ""
 
-    value = BeautifulSoup(str(value), "html.parser").get_text(" ", strip=True)
-    value = re.sub(r"\s+", " ", value)
-    return value.strip()
+    text = text.lower()
+    text = text.replace("–", "-")
+    text = text.replace("—", "-")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
-def normalize(value):
-    value = clean_text(value).lower()
+def clean_price(text):
+    if not text:
+        return "N/A"
 
-    # Replace common separators with spaces.
-    value = value.replace("-", " ")
-    value = value.replace("_", " ")
-    value = value.replace("/", " ")
-    value = value.replace("\\", " ")
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
 
-    # Remove special characters.
-    value = re.sub(r"[^a-z0-9.+ ]+", " ", value)
+    if len(text) > 80:
+        return "N/A"
 
-    value = re.sub(r"\s+", " ", value)
-
-    return value.strip()
+    return text
 
 
-def normalize_compact(value):
-    return re.sub(r"[^a-z0-9]", "", normalize(value))
-
-
-def absolute_url(base, href):
-    if not href:
+def clean_title(text):
+    if not text:
         return ""
 
-    href = href.strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
-    if href.startswith("#"):
+
+def absolute_url(base_url, link):
+    if not link:
         return ""
 
-    return urljoin(base, href)
+    return urljoin(base_url, link)
 
 
-# ============================================================
-# QUERY / MATCHING
-# ============================================================
-
-GENERIC_WORDS = {
-    "buy",
-    "online",
-    "india",
-    "electronic",
-    "electronics",
-    "component",
-    "components",
-    "module",
-    "modules",
-    "board",
-    "boards",
-    "ic",
-    "chip",
-    "part",
-    "parts",
-}
-
-
-def extract_search_terms(query):
+def extract_main_component(query):
     """
-    Creates strict matching terms from the user's query.
+    Extract the actual component name from the complete query.
 
     Example:
-
-        LM2596 3A
-
-    becomes:
-
-        ["lm2596"]
-
-    Example:
+        LM2596 DIP 3A
+        -> LM2596
 
         Arduino Nano 5V
+        -> Arduino Nano
 
-    becomes:
-
-        ["arduino", "nano"]
-
-    Technical specification values are deliberately not always
-    treated as product-name requirements.
+    The first part is intentionally kept strict so unrelated
+    components are not returned.
     """
 
     q = normalize(query)
 
+    # Known multi-word components
+    known_multi = [
+        "arduino nano",
+        "arduino uno",
+        "arduino mega",
+        "esp32 devkit",
+        "esp32 wroom",
+        "raspberry pi",
+        "logic level converter",
+        "buck converter",
+        "boost converter",
+        "dc dc converter",
+    ]
+
+    for item in known_multi:
+        if item in q:
+            return item
+
+    # IC / part-number style
+    m = re.match(
+        r"^([a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+)?)",
+        q,
+        re.I,
+    )
+
+    if m:
+        return m.group(1)
+
+    # Otherwise first 1-3 meaningful words
     words = q.split()
 
-    terms = []
+    if not words:
+        return ""
 
-    for word in words:
-
-        compact = re.sub(r"[^a-z0-9]", "", word)
-
-        if not compact:
-            continue
-
-        # Ignore generic words.
-        if compact in GENERIC_WORDS:
-            continue
-
-        # Ignore common electrical specification values.
-        if re.fullmatch(
-            r"\d+(\.\d+)?(v|mv|a|ma|w|mw|ohm|kohm|mohm|uf|nf|pf|hz|khz|mhz|ghz)",
-            compact
-        ):
-            continue
-
-        # Package dimensions.
-        if re.fullmatch(r"\d{3,4}", compact):
-            continue
-
-        # Common package names.
-        if compact in {
-            "dip",
-            "smd",
-            "smt",
-            "sop",
-            "soic",
-            "qfn",
-            "qfp",
-            "tssop",
-            "to220",
-            "to263",
-            "to92",
-        }:
-            continue
-
-        if len(compact) >= 2:
-            terms.append(compact)
-
-    return terms
+    return " ".join(words[:2])
 
 
-def strict_product_match(title, query):
+def product_matches(product, query):
     """
-    Strict matching.
+    Strict filtering.
 
-    All important component-name terms must occur in the
-    product title.
-
-    This prevents:
-
-        LM2596
-
-    from returning:
-
-        LM317
-        7805
-        diode
-        resistor
-        capacitor
-
+    A product must contain the actual component name.
+    This prevents LM2596 searches from returning random
+    resistors, transistors, diodes, etc.
     """
 
-    title_norm = normalize(title)
-    title_compact = normalize_compact(title)
+    title = normalize(product.get("title", ""))
+    query_normalized = normalize(query)
 
-    terms = extract_search_terms(query)
+    component = extract_main_component(query_normalized)
 
-    if not terms:
-        return True
-
-    for term in terms:
-
-        term_norm = normalize(term)
-        term_compact = normalize_compact(term)
-
-        if not term_norm:
-            continue
-
-        # Normal match.
-        if term_norm in title_norm:
-            continue
-
-        # Compact match.
-        if term_compact in title_compact:
-            continue
-
+    if not component:
         return False
+
+    if component not in title:
+        return False
+
+    # Additional important specifications are checked when
+    # they are explicit in the search query.
+    words = query_normalized.split()
+
+    # Voltage
+    voltage_patterns = [
+        r"\b\d+(?:\.\d+)?v\b",
+        r"\b\d+(?:\.\d+)?\s*volt\b",
+    ]
+
+    for pattern in voltage_patterns:
+        matches = re.findall(pattern, query_normalized)
+
+        for value in matches:
+            if normalize(value) not in title:
+                # Voltage is a secondary condition, so don't reject
+                # immediately when distributor titles omit it.
+                pass
 
     return True
 
 
-# ============================================================
-# AVAILABILITY
-# ============================================================
+def parse_generic(html, base_url, query):
+    """
+    Generic parser used by most distributor sites.
+    """
 
-OUT_OF_STOCK_PATTERNS = [
-    "out of stock",
-    "sold out",
-    "currently unavailable",
-    "not available",
-    "unavailable",
-    "temporarily unavailable",
-    "no stock",
-    "stock unavailable",
-]
-
-
-IN_STOCK_PATTERNS = [
-    "in stock",
-    "available",
-    "add to cart",
-    "buy now",
-    "order now",
-    "ships in",
-    "ready to ship",
-]
-
-
-def detect_availability(text):
-    text = normalize(text)
-
-    for pattern in OUT_OF_STOCK_PATTERNS:
-        if pattern in text:
-            return "Out of Stock"
-
-    for pattern in IN_STOCK_PATTERNS:
-        if pattern in text:
-            return "In Stock"
-
-    return "Availability Unknown"
-
-
-def extract_price(text):
-    if not text:
-        return "N/A"
-
-    text = clean_text(text)
-
-    patterns = [
-        r"(₹\s?[\d,]+(?:\.\d+)?)",
-        r"(Rs\.?\s?[\d,]+(?:\.\d+)?)",
-        r"(INR\s?[\d,]+(?:\.\d+)?)",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            flags=re.IGNORECASE
-        )
-
-        if match:
-            return match.group(1)
-
-    return "N/A"
-
-
-# ============================================================
-# GENERIC PRODUCT PARSER
-# ============================================================
-
-def parse_generic_products(html, base_url, query):
     soup = BeautifulSoup(html, "html.parser")
-
     products = []
-    seen = set()
 
     selectors = [
-        "li.product",
-        ".product",
+        ".product-thumb",
         ".product-item",
         ".product-card",
-        ".product-thumb",
         ".product-small",
-        ".product-type-simple",
+        ".product",
         ".grid-product",
         ".product-grid-item",
-        ".card-product",
-        ".product-inner",
-        "article",
+        "li.product",
+        ".item.product",
+        ".product-tile",
+        ".product-item-info",
     ]
 
-    nodes = []
+    items = []
 
     for selector in selectors:
         found = soup.select(selector)
 
         if found:
-            nodes.extend(found)
+            items.extend(found)
 
-    # Remove duplicate DOM nodes.
-    unique_nodes = []
-
+    # Remove duplicates
     seen_nodes = set()
+    unique_items = []
 
-    for node in nodes:
-        marker = id(node)
+    for item in items:
+        marker = str(item)[:500]
 
         if marker not in seen_nodes:
             seen_nodes.add(marker)
-            unique_nodes.append(node)
+            unique_items.append(item)
 
-    for item in unique_nodes:
+    for item in unique_items:
 
-        title_element = (
+        title_node = (
             item.select_one(
-                "h1, h2, h3, h4, h5, "
                 ".product-title, "
                 ".product-name, "
                 ".name, "
-                ".woocommerce-loop-product__title, "
-                ".card-title, "
+                ".caption h4 a, "
                 ".product-item-link, "
+                "h2 a, "
+                "h3 a, "
+                "h4 a, "
+                "h2, "
+                "h3, "
+                "h4"
+            )
+        )
+
+        if not title_node:
+            continue
+
+        title = clean_title(title_node.get_text(" ", strip=True))
+
+        if not title:
+            continue
+
+        link_node = (
+            item.select_one(
+                "a.product-title, "
+                "a.product-name, "
+                ".product-title a, "
+                ".product-name a, "
+                ".caption h4 a, "
+                ".product-item-link, "
+                "h2 a, "
+                "h3 a, "
+                "h4 a, "
                 "a"
             )
         )
 
-        if not title_element:
-            continue
+        link = ""
 
-        title = clean_text(title_element.get_text(" ", strip=True))
+        if link_node:
+            link = absolute_url(
+                base_url,
+                link_node.get("href", "")
+            )
 
-        if not title:
-            continue
-
-        if len(title) < 2:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = item.select_one(
-            "a[href]"
-        )
-
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
-        )
-
-        if not link:
-            continue
-
-        if link in seen:
-            continue
-
-        seen.add(link)
-
-        item_text = clean_text(
-            item.get_text(" ", strip=True)
-        )
-
-        price_element = item.select_one(
+        price_node = item.select_one(
             ".price, "
             ".product-price, "
             ".price-box, "
             ".woocommerce-Price-amount, "
-            ".amount"
+            ".money, "
+            "[class*='price']"
         )
 
-        if price_element:
-            price_text = clean_text(
-                price_element.get_text(" ", strip=True)
-            )
-        else:
-            price_text = item_text
+        price = (
+            clean_price(price_node.get_text(" ", strip=True))
+            if price_node
+            else "N/A"
+        )
 
-        price = extract_price(price_text)
-
-        availability = detect_availability(item_text)
-
-        products.append({
+        product = {
             "title": title,
             "link": link,
             "price": price,
-            "availability": availability,
-        })
+            "availability": "Availability Unknown",
+        }
 
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
+        if product_matches(product, query):
+            products.append(product)
 
     return products
 
 
-# ============================================================
-# SHOPIFY PARSER
-# ============================================================
-
-def parse_shopify_products(html, base_url, query):
+def parse_etstore(html, query):
     soup = BeautifulSoup(html, "html.parser")
-
     products = []
-    seen = set()
 
-    selectors = [
-        ".product-card",
-        ".card",
-        ".grid__item",
-        ".product-item",
-        ".product-grid-item",
-        "li.grid__item",
-    ]
+    for item in soup.select(".product-thumb"):
 
-    nodes = []
+        title_node = item.select_one(".caption h4 a")
 
-    for selector in selectors:
-        nodes.extend(soup.select(selector))
+        if not title_node:
+            continue
 
-    for item in nodes:
-
-        title_element = item.select_one(
-            ".card__heading a, "
-            ".card__heading, "
-            ".product-title a, "
-            ".product-title, "
-            ".product-card__title a, "
-            ".product-card__title, "
-            "h2 a, "
-            "h3 a, "
-            "h2, "
-            "h3"
+        title = clean_title(
+            title_node.get_text(" ", strip=True)
         )
 
-        if not title_element:
-            continue
-
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
-        )
-
-        if not title:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = item.select_one("a[href]")
-
-        if not link_element:
+        if not product_matches({"title": title}, query):
             continue
 
         link = absolute_url(
-            base_url,
-            link_element.get("href")
+            "https://etstore.in/",
+            title_node.get("href", "")
         )
 
-        if not link or link in seen:
-            continue
+        price_node = item.select_one(".price")
 
-        seen.add(link)
-
-        text = clean_text(
-            item.get_text(" ", strip=True)
+        price = (
+            clean_price(price_node.get_text(" ", strip=True))
+            if price_node
+            else "N/A"
         )
 
-        price = extract_price(text)
-
-        availability = detect_availability(text)
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
+        products.append(
+            {
+                "title": title,
+                "link": link,
+                "price": price,
+                "availability": "Availability Unknown",
+            }
+        )
 
     return products
 
 
-# ============================================================
-# ELEMENT14 PARSER
-# ============================================================
-
-def parse_element14(html, base_url, query):
+def parse_robu(html, query):
     soup = BeautifulSoup(html, "html.parser")
-
     products = []
-    seen = set()
 
     selectors = [
-        ".product-listing",
-        ".product-item",
-        ".listing-item",
-        ".product-list",
-        "article",
-        "[data-product-id]",
-    ]
-
-    nodes = []
-
-    for selector in selectors:
-        nodes.extend(soup.select(selector))
-
-    for item in nodes:
-
-        title_element = item.select_one(
-            "h2 a, "
-            "h3 a, "
-            "h4 a, "
-            ".product-name a, "
-            ".product-name, "
-            ".description a, "
-            "a[href]"
-        )
-
-        if not title_element:
-            continue
-
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
-        )
-
-        if not title:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = (
-            title_element
-            if title_element.name == "a"
-            else item.select_one("a[href]")
-        )
-
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
-        )
-
-        if not link or link in seen:
-            continue
-
-        seen.add(link)
-
-        text = clean_text(
-            item.get_text(" ", strip=True)
-        )
-
-        price = extract_price(text)
-
-        availability = detect_availability(text)
-
-        # element14 often uses explicit stock wording.
-        stock_match = re.search(
-            r"([\d,]+)\s+in\s+stock",
-            text,
-            flags=re.IGNORECASE
-        )
-
-        if stock_match:
-            availability = (
-                f"In Stock ({stock_match.group(1)})"
-            )
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
-
-    return products
-
-
-# ============================================================
-# ROBU CATEGORY ROUTING
-# ============================================================
-
-def get_robu_urls(query):
-    q = normalize(query)
-
-    urls = []
-
-    # Direct search.
-    urls.append(
-        f"https://robu.in/?s={quote_plus(query)}"
-        f"&post_type=product"
-    )
-
-    # Category pages are used as additional fallbacks.
-    if "lm2596" in q or "buck converter" in q:
-        urls.extend([
-            "https://robu.in/product-category/buck-converter/",
-            "https://robu.in/product-category/switching-ic/",
-        ])
-
-    elif "555" in q or "timer" in q:
-        urls.append(
-            "https://robu.in/product-category/clock-and-timer-ic/"
-        )
-
-    elif "arduino" in q or "esp32" in q or "esp8266" in q:
-        urls.append(
-            "https://robu.in/product-category/development-boards/"
-        )
-
-    elif "resistor" in q:
-        urls.append(
-            "https://robu.in/product-category/resistors/"
-        )
-
-    elif "capacitor" in q:
-        urls.append(
-            "https://robu.in/product-category/capacitors/"
-        )
-
-    elif "diode" in q:
-        urls.append(
-            "https://robu.in/product-category/diodes/"
-        )
-
-    elif "transistor" in q:
-        urls.append(
-            "https://robu.in/product-category/transistors/"
-        )
-
-    # Remove duplicates.
-    result = []
-
-    for url in urls:
-        if url not in result:
-            result.append(url)
-
-    return result
-
-
-# ============================================================
-# ROBU PARSER
-# ============================================================
-
-def parse_robu_products(html, base_url, query):
-    soup = BeautifulSoup(html, "html.parser")
-
-    products = []
-    seen = set()
-
-    selectors = [
-        "li.product",
         ".product-small",
+        "li.product",
         ".product-type-simple",
         ".product",
-        ".product-item",
-        ".product-card",
-        "article",
     ]
 
-    nodes = []
+    items = []
 
     for selector in selectors:
-        nodes.extend(soup.select(selector))
+        items.extend(soup.select(selector))
 
-    for item in nodes:
+    seen = set()
 
-        title_element = item.select_one(
-            ".name a, "
-            ".name, "
-            ".product-title a, "
-            ".product-title, "
-            ".woocommerce-loop-product__title, "
-            "h2 a, "
-            "h3 a, "
-            "h4 a"
+    for item in items:
+
+        title_node = (
+            item.select_one(".name")
+            or item.select_one(".product-title")
+            or item.select_one(".woocommerce-loop-product__title")
+            or item.select_one("h2")
+            or item.select_one("h3")
         )
 
-        if not title_element:
+        if not title_node:
             continue
 
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
+        title = clean_title(
+            title_node.get_text(" ", strip=True)
         )
 
         if not title:
             continue
 
-        if not strict_product_match(title, query):
+        if normalize(title) in seen:
             continue
 
-        link_element = item.select_one(
-            "a[href]"
+        seen.add(normalize(title))
+
+        if not product_matches({"title": title}, query):
+            continue
+
+        link_node = item.select_one("a[href]")
+
+        link = ""
+
+        if link_node:
+            link = absolute_url(
+                "https://robu.in/",
+                link_node.get("href", "")
+            )
+
+        price_node = (
+            item.select_one(".price")
+            or item.select_one(".woocommerce-Price-amount")
         )
 
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
+        price = (
+            clean_price(price_node.get_text(" ", strip=True))
+            if price_node
+            else "N/A"
         )
 
-        if not link or link in seen:
-            continue
-
-        seen.add(link)
-
-        text = clean_text(
+        # Try to detect availability from card text
+        card_text = normalize(
             item.get_text(" ", strip=True)
         )
 
-        price_element = item.select_one(
-            ".price, "
-            ".woocommerce-Price-amount, "
-            ".amount"
-        )
-
-        if price_element:
-            price_text = clean_text(
-                price_element.get_text(" ", strip=True)
-            )
+        if "out of stock" in card_text:
+            availability = "Out of Stock"
+        elif "in stock" in card_text:
+            availability = "In Stock"
         else:
-            price_text = text
+            availability = "Availability Unknown"
 
-        price = extract_price(price_text)
-
-        availability = detect_availability(text)
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
+        products.append(
+            {
+                "title": title,
+                "link": link,
+                "price": price,
+                "availability": availability,
+            }
+        )
 
     return products
 
 
-# ============================================================
-# PROBOTS PARSER
-# ============================================================
+def parse_site(store_name, html, query):
 
-def parse_probots_products(html, base_url, query):
-    soup = BeautifulSoup(html, "html.parser")
+    if store_name == "ET Store":
+        return parse_etstore(html, query)
 
-    products = []
-    seen = set()
+    if store_name == "Robu.in":
+        return parse_robu(html, query)
 
-    selectors = [
-        ".product-item",
-        "li.product-item",
-        ".product",
-        ".item.product",
-        "article",
-    ]
-
-    nodes = []
-
-    for selector in selectors:
-        nodes.extend(soup.select(selector))
-
-    for item in nodes:
-
-        title_element = item.select_one(
-            ".product-item-link, "
-            ".product-name a, "
-            ".product-name, "
-            "h2 a, "
-            "h3 a, "
-            "h4 a"
-        )
-
-        if not title_element:
-            continue
-
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
-        )
-
-        if not title:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = (
-            title_element
-            if title_element.name == "a"
-            else item.select_one("a[href]")
-        )
-
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
-        )
-
-        if not link or link in seen:
-            continue
-
-        seen.add(link)
-
-        text = clean_text(
-            item.get_text(" ", strip=True)
-        )
-
-        price = extract_price(text)
-        availability = detect_availability(text)
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
-
-    return products
-
-
-# ============================================================
-# TOMSON PARSER
-# ============================================================
-
-def parse_tomson_products(html, base_url, query):
-    soup = BeautifulSoup(html, "html.parser")
-
-    products = []
-    seen = set()
-
-    selectors = [
-        ".product-card",
-        ".productgrid--item",
-        ".product-item",
-        ".product",
-        ".card",
-        "article",
-    ]
-
-    nodes = []
-
-    for selector in selectors:
-        nodes.extend(soup.select(selector))
-
-    for item in nodes:
-
-        title_element = item.select_one(
-            ".product-card__title a, "
-            ".product-card__title, "
-            ".product-title a, "
-            ".product-title, "
-            "h3 a, "
-            "h3, "
-            "h2 a, "
-            "h2"
-        )
-
-        if not title_element:
-            continue
-
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
-        )
-
-        if not title:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = item.select_one(
-            "a[href]"
-        )
-
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
-        )
-
-        if not link or link in seen:
-            continue
-
-        seen.add(link)
-
-        text = clean_text(
-            item.get_text(" ", strip=True)
-        )
-
-        price = extract_price(text)
-        availability = detect_availability(text)
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
-
-    return products
-
-
-# ============================================================
-# EVELTA PARSER
-# ============================================================
-
-def parse_evelta_products(html, base_url, query):
-    soup = BeautifulSoup(html, "html.parser")
-
-    products = []
-    seen = set()
-
-    selectors = [
-        ".product-item",
-        ".product",
-        ".product-card",
-        ".item.product",
-        "article",
-    ]
-
-    nodes = []
-
-    for selector in selectors:
-        nodes.extend(soup.select(selector))
-
-    for item in nodes:
-
-        title_element = item.select_one(
-            ".product-item-link",
-            ".product-name",
-            ".product-title",
-            "h2 a",
-            "h3 a",
-            "h4 a",
-        )
-
-        if not title_element:
-            # BeautifulSoup select_one doesn't accept a list,
-            # so fallback below.
-            title_element = item.select_one(
-                ".product-item-link, "
-                ".product-name, "
-                ".product-title, "
-                "h2 a, "
-                "h3 a, "
-                "h4 a"
-            )
-
-        if not title_element:
-            continue
-
-        title = clean_text(
-            title_element.get_text(" ", strip=True)
-        )
-
-        if not title:
-            continue
-
-        if not strict_product_match(title, query):
-            continue
-
-        link_element = (
-            title_element
-            if title_element.name == "a"
-            else item.select_one("a[href]")
-        )
-
-        if not link_element:
-            continue
-
-        link = absolute_url(
-            base_url,
-            link_element.get("href")
-        )
-
-        if not link or link in seen:
-            continue
-
-        seen.add(link)
-
-        text = clean_text(
-            item.get_text(" ", strip=True)
-        )
-
-        price = extract_price(text)
-        availability = detect_availability(text)
-
-        stock_match = re.search(
-            r"([\d,]+)\s+in\s+stock",
-            text,
-            flags=re.IGNORECASE
-        )
-
-        if stock_match:
-            availability = (
-                f"In Stock ({stock_match.group(1)})"
-            )
-
-        products.append({
-            "title": title,
-            "link": link,
-            "price": price,
-            "availability": availability,
-        })
-
-        if len(products) >= MAX_PRODUCTS_PER_SITE:
-            break
-
-    return products
-
-
-# ============================================================
-# PARSER SELECTOR
-# ============================================================
-
-def parse_products(store_type, html, base_url, query):
-
-    if store_type == "robu":
-        return parse_robu_products(
-            html,
-            base_url,
-            query
-        )
-
-    if store_type == "shopify":
-        return parse_shopify_products(
-            html,
-            base_url,
-            query
-        )
-
-    if store_type == "element14":
-        return parse_element14(
-            html,
-            base_url,
-            query
-        )
-
-    if store_type == "tomson":
-        return parse_tomson_products(
-            html,
-            base_url,
-            query
-        )
-
-    if store_type == "evelta":
-        return parse_evelta_products(
-            html,
-            base_url,
-            query
-        )
-
-    if store_type == "probots":
-        return parse_probots_products(
-            html,
-            base_url,
-            query
-        )
-
-    return parse_generic_products(
+    return parse_generic(
         html,
-        base_url,
-        query
+        next(
+            (
+                s["search_url"](query)
+                for s in DISTRIBUTORS
+                if s["name"] == store_name
+            ),
+            "",
+        ),
+        query,
     )
 
 
 # ============================================================
-# HTTP FETCH
+# HTTP SEARCH
 # ============================================================
 
-async def fetch_http(client, url):
-    try:
+async def http_search(store, query):
 
-        response = await client.get(
-            url,
-            headers=HEADERS,
-            timeout=HTTP_TIMEOUT,
-            follow_redirects=True,
+    url = store["search_url"](query)
+
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,"
+            "image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+    timeout = httpx.Timeout(
+        connect=8.0,
+        read=15.0,
+        write=8.0,
+        pool=8.0,
+    )
+
+    async with httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        follow_redirects=True,
+    ) as client:
+
+        response = await client.get(url)
+
+        response.raise_for_status()
+
+        products = parse_site(
+            store["name"],
+            response.text,
+            query,
         )
 
-        if response.status_code >= 400:
-            return None
-
-        if not response.text:
-            return None
-
-        return response.text
-
-    except Exception:
-        return None
+        return products
 
 
 # ============================================================
-# CAMOUFOX FETCH
+# CAMOUFOX FALLBACK
 # ============================================================
 
-async def fetch_camoufox(url):
+async def camoufox_search(store, query):
 
     if not CAMOUFOX_AVAILABLE:
-        return None
+        return []
 
-    browser = None
+    url = store["search_url"](query)
 
     try:
-
         async with AsyncCamoufox(
             headless=True,
             humanize=True,
@@ -1331,478 +595,243 @@ async def fetch_camoufox(url):
             await page.goto(
                 url,
                 wait_until="domcontentloaded",
-                timeout=BROWSER_TIMEOUT,
+                timeout=25000,
             )
 
-            # Give JavaScript-rendered products time to appear.
-            await page.wait_for_timeout(1800)
+            await page.wait_for_timeout(1500)
 
             html = await page.content()
 
-            return html
-
-    except Exception:
-        return None
-
-
-# ============================================================
-# INDIVIDUAL PRODUCT AVAILABILITY
-# ============================================================
-
-async def check_product_availability(
-    client,
-    product
-):
-
-    try:
-
-        response = await client.get(
-            product["link"],
-            headers=HEADERS,
-            timeout=8.0,
-            follow_redirects=True,
-        )
-
-        if response.status_code >= 400:
-            return product
-
-        text = clean_text(response.text)
-
-        availability = detect_availability(text)
-
-        if availability != "Availability Unknown":
-            product["availability"] = availability
-
-        # Re-check price if search result didn't have one.
-        if product.get("price") == "N/A":
-
-            price = extract_price(text)
-
-            if price != "N/A":
-                product["price"] = price
-
-        return product
-
-    except Exception:
-        return product
-
-
-# ============================================================
-# SEARCH ONE STORE
-# ============================================================
-
-async def search_store(
-    store,
-    query,
-    client
-):
-
-    name = store["name"]
-
-    # --------------------------------------------------------
-    # ROBU
-    # --------------------------------------------------------
-
-    if store["type"] == "robu":
-
-        urls = get_robu_urls(query)
-
-        all_products = []
-
-        for url in urls:
-
-            html = await fetch_http(
-                client,
-                url
-            )
-
-            if html:
-
-                products = parse_robu_products(
-                    html,
-                    url,
-                    query
-                )
-
-                all_products.extend(products)
-
-                if len(all_products) >= MAX_PRODUCTS_PER_SITE:
-                    break
-
-        # Deduplicate.
-        unique = []
-
-        seen = set()
-
-        for product in all_products:
-
-            key = (
-                product["link"]
-                or product["title"]
-            )
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-            unique.append(product)
-
-        if unique:
-
-            unique = unique[:MAX_PRODUCTS_PER_SITE]
-
-            # Check actual product pages for availability.
-            checked = await asyncio.gather(
-                *[
-                    check_product_availability(
-                        client,
-                        product
-                    )
-                    for product in unique[:10]
-                ],
-                return_exceptions=True
-            )
-
-            final_products = []
-
-            for result in checked:
-
-                if isinstance(result, dict):
-                    final_products.append(result)
-
-            if final_products:
-                return final_products
-
-            return unique
-
-        # Camoufox fallback for Robu.
-        for url in urls[:2]:
-
-            html = await fetch_camoufox(url)
-
-            if not html:
-                continue
-
-            products = parse_robu_products(
+            return parse_site(
+                store["name"],
                 html,
-                url,
-                query
+                query,
             )
 
-            if products:
-                return products[:MAX_PRODUCTS_PER_SITE]
-
+    except Exception:
         return []
 
 
-    # --------------------------------------------------------
-    # NORMAL STORE
-    # --------------------------------------------------------
+# ============================================================
+# SEARCH ONE DISTRIBUTOR
+# ============================================================
 
-    url = store["search"](query)
+async def search_store(store, query):
 
-    html = await fetch_http(
-        client,
-        url
-    )
-
-    if html:
-
-        products = parse_products(
-            store["type"],
-            html,
-            url,
-            query
+    try:
+        products = await http_search(
+            store,
+            query,
         )
 
         if products:
-            return products[:MAX_PRODUCTS_PER_SITE]
+            return products
 
-    # --------------------------------------------------------
-    # CAMOUFOX FALLBACK
-    # --------------------------------------------------------
+    except Exception:
+        pass
 
-    html = await fetch_camoufox(url)
-
-    if html:
-
-        products = parse_products(
-            store["type"],
-            html,
-            url,
-            query
+    # Browser fallback for sites that block normal HTTP
+    try:
+        products = await camoufox_search(
+            store,
+            query,
         )
 
-        if products:
-            return products[:MAX_PRODUCTS_PER_SITE]
+        return products
 
-    return []
-
-
-# ============================================================
-# SEARCH ALL STORES
-# ============================================================
-
-async def search_all_stores(query):
-
-    timeout = httpx.Timeout(
-        connect=8.0,
-        read=HTTP_TIMEOUT,
-        write=8.0,
-        pool=8.0,
-    )
-
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=True,
-        headers=HEADERS,
-    ) as client:
-
-        tasks = []
-
-        for store in STORES:
-
-            tasks.append(
-                search_store(
-                    store,
-                    query,
-                    client
-                )
-            )
-
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=True
-        )
-
-        output = []
-
-        for index, result in enumerate(results):
-
-            store = STORES[index]
-
-            if isinstance(result, Exception):
-                output.append({
-                    "site": store["name"],
-                    "products": [],
-                    "error": True,
-                })
-
-            else:
-                output.append({
-                    "site": store["name"],
-                    "products": result or [],
-                    "error": False,
-                })
-
-        return output
+    except Exception:
+        return []
 
 
 # ============================================================
-# SSE HELPERS
+# SSE EVENT GENERATOR
 # ============================================================
 
-def sse(data):
-    return (
-        f"data: {json.dumps(data, ensure_ascii=False)}"
-        f"\n\n"
-    )
+async def event_generator(query, selected_sites):
 
+    # --------------------------------------------------------
+    # Determine which sites will actually be searched
+    # --------------------------------------------------------
 
-# ============================================================
-# SSE SEARCH GENERATOR
-# ============================================================
+    valid_names = {
+        store["name"]
+        for store in DISTRIBUTORS
+    }
 
-async def event_generator(query):
+    if selected_sites:
+        selected_set = {
+            name.strip()
+            for name in selected_sites
+            if name.strip() in valid_names
+        }
 
-    query = clean_text(query)
+        stores_to_search = [
+            store
+            for store in DISTRIBUTORS
+            if store["name"] in selected_set
+        ]
 
-    if not query:
-
-        yield sse({
-            "type": "error",
-            "message": "Please enter a component name."
-        })
-
-        yield sse({
-            "type": "done"
-        })
-
-        return
+    else:
+        stores_to_search = DISTRIBUTORS
 
     site_names = [
         store["name"]
-        for store in STORES
+        for store in stores_to_search
     ]
 
-    # Initial list.
-    yield sse({
-        "type": "init",
-        "sites": site_names
-    })
-
-    # --------------------------------------------------------
-    # We send searching status immediately.
-    # --------------------------------------------------------
-
-    for site in site_names:
-
-        yield sse({
-            "type": "status",
-            "site": site,
-            "state": "searching"
-        })
-
-    # --------------------------------------------------------
-    # Run searches in parallel.
-    # --------------------------------------------------------
-
-    timeout = httpx.Timeout(
-        connect=8.0,
-        read=HTTP_TIMEOUT,
-        write=8.0,
-        pool=8.0,
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "type": "init",
+                "sites": site_names,
+            }
+        )
+        + "\n\n"
     )
 
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=True,
-        headers=HEADERS,
-    ) as client:
+    # --------------------------------------------------------
+    # Search distributors concurrently
+    # --------------------------------------------------------
 
-        async def run_one(store):
+    async def run_store(store):
+
+        site = store["name"]
+
+        return site, await search_store(
+            store,
+            query,
+        )
+
+    tasks = []
+
+    for store in stores_to_search:
+
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "status",
+                    "site": store["name"],
+                    "state": "searching",
+                }
+            )
+            + "\n\n"
+        )
+
+        tasks.append(
+            asyncio.create_task(
+                run_store(store)
+            )
+        )
+
+    # --------------------------------------------------------
+    # Return results as soon as each site finishes
+    # --------------------------------------------------------
+
+    pending = set(tasks)
+
+    while pending:
+
+        done_tasks, pending = await asyncio.wait(
+            pending,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in done_tasks:
 
             try:
+                site, products = await task
 
-                products = await search_store(
-                    store,
-                    query,
-                    client
-                )
+            except Exception:
+                continue
 
-                return {
-                    "site": store["name"],
-                    "products": products or [],
-                    "error": False,
-                }
-
-            except Exception as exc:
-
-                print(
-                    f"[{store['name']}] ERROR: {exc}"
-                )
-
-                return {
-                    "site": store["name"],
-                    "products": [],
-                    "error": True,
-                }
-
-        tasks = [
-            asyncio.create_task(
-                run_one(store)
-            )
-            for store in STORES
-        ]
-
-        # ----------------------------------------------------
-        # Send each site's result as soon as it finishes.
-        # ----------------------------------------------------
-
-        remaining = set(tasks)
-
-        while remaining:
-
-            done, remaining = await asyncio.wait(
-                remaining,
-                return_when=asyncio.FIRST_COMPLETED
-            )
-
-            for task in done:
-
-                try:
-                    result = task.result()
-
-                except Exception as exc:
-
-                    print(
-                        f"[SEARCH ERROR] {exc}"
-                    )
-
-                    continue
-
-                site = result["site"]
-                products = result["products"]
-
-                # --------------------------------------------
-                # Success
-                # --------------------------------------------
-
-                if products:
-
-                    yield sse({
+            yield (
+                "data: "
+                + json.dumps(
+                    {
                         "type": "status",
                         "site": site,
                         "state": "done",
                         "count": len(products),
-                    })
+                    }
+                )
+                + "\n\n"
+            )
 
-                    # Add site to each product.
-                    for product in products:
-                        product["site"] = site
+            if products:
 
-                    yield sse({
-                        "type": "result",
-                        "site": site,
-                        "products": products,
-                    })
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "result",
+                            "site": site,
+                            "products": products,
+                        }
+                    )
+                    + "\n\n"
+                )
 
-                # --------------------------------------------
-                # No result
-                # --------------------------------------------
-
-                else:
-
-                    yield sse({
-                        "type": "status",
-                        "site": site,
-                        "state": "done",
-                        "count": 0,
-                    })
-
-    # --------------------------------------------------------
-    # COMPLETE
-    # --------------------------------------------------------
-
-    yield sse({
-        "type": "done"
-    })
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "type": "done",
+            }
+        )
+        + "\n\n"
+    )
 
 
 # ============================================================
 # API
 # ============================================================
 
-@app.get("/")
-async def root():
+@app.get("/api/sites")
+async def get_sites():
 
     return {
-        "status": "ok",
-        "service": "component-finder",
-        "version": "3.0",
-        "stores": [
+        "sites": [
             store["name"]
-            for store in STORES
-        ],
-        "camoufox": CAMOUFOX_AVAILABLE,
+            for store in DISTRIBUTORS
+        ]
     }
 
 
 @app.get("/api/search")
-async def search(q: str):
+async def search(
+    q: str,
+    sites: list[str] | None = Query(default=None),
+):
+
+    q = q.strip()
+
+    if not q:
+
+        async def empty_stream():
+
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Search query is empty",
+                    }
+                )
+                + "\n\n"
+            )
+
+        return StreamingResponse(
+            empty_stream(),
+            media_type="text/event-stream",
+        )
 
     return StreamingResponse(
-        event_generator(q),
+        event_generator(
+            q,
+            sites,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1812,17 +841,11 @@ async def search(q: str):
     )
 
 
-# ============================================================
-# LOCAL RUN
-# ============================================================
+@app.get("/")
+async def root():
 
-if __name__ == "__main__":
-
-    import uvicorn
-
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-    )
+    return {
+        "status": "online",
+        "service": "Component Finder API",
+        "sites": len(DISTRIBUTORS),
+    }
