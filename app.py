@@ -1,64 +1,69 @@
+import json
 import asyncio
-from flask import Flask, render_template, request, jsonify
-from camoufox.async_api import AsyncCamoufox
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+import httpx
+from bs4 import BeautifulSoup
 
-app = Flask(__name__, template_folder=".")
+app = FastAPI()
 
-async def fetch_robo_in_details(query):
-    """
-    Fetches component details from robo.in using Camoufox to bypass bot detection.
-    """
-    url = f"https://robo.in/search?q={query}"
-    
-    # Launch Camoufox headless browser
-    async with AsyncCamoufox(headless=True) as browser:
-        page = await browser.new_page()
-        
-        # Navigate to target page
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        
-        # Example extraction logic for Robo.in (Update selectors based on target DOM structure)
-        results = []
-        products = await page.query_selector_all(".product-card, .grid__item")
-        
-        for product in products[:5]:  # Get top 5 results
-            title_el = await product.query_selector(".product-card__title, .card__heading")
-            price_el = await product.query_selector(".price-item--regular, .price")
-            link_el = await product.query_selector("a")
-            
-            title = await title_el.inner_text() if title_el else "N/A"
-            price = await price_el.inner_text() if price_el else "N/A"
-            link = await link_el.get_attribute("href") if link_el else "#"
-            
-            if link and not link.startswith("http"):
-                link = f"https://robo.in{link}"
+# Enable CORS so GitHub Pages can call your Render API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DISTRIBUTORS = [
+    {
+        "name": "ET Store",
+        "url": lambda q: f"https://etstore.in/index.php?route=product/search&search={q}",
+        "parse": lambda html: [
+            {
+                "title": item.select_one(".caption h4 a").get_text(strip=True),
+                "link": item.select_one(".caption h4 a")["href"],
+                "price": item.select_one(".price").get_text(strip=True).split('\n')[0]
+            }
+            for item in BeautifulSoup(html, "html.parser").select(".product-thumb")
+            if item.select_one(".caption h4 a")
+        ]
+    },
+    {
+        "name": "Robu.in",
+        "url": lambda q: f"https://robu.in/?s={q}&post_type=product",
+        "parse": lambda html: [
+            {
+                "title": item.select_one(".name, .product-title").get_text(strip=True),
+                "link": item.select_one("a")["href"],
+                "price": item.select_one(".price").get_text(strip=True) if item.select_one(".price") else "N/A"
+            }
+            for item in BeautifulSoup(html, "html.parser").select(".product-small, .product-type-simple")
+            if item.select_one(".name, .product-title")
+        ]
+    }
+]
+
+async def event_generator(query: str):
+    site_names = [d["name"] for d in DISTRIBUTORS]
+    yield f"data: {json.dumps({'type': 'init', 'sites': site_names})}\n\n"
+
+    async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}) as client:
+        for store in DISTRIBUTORS:
+            yield f"data: {json.dumps({'type': 'status', 'site': store['name'], 'state': 'searching'})}\n\n"
+            try:
+                resp = await client.get(store["url"](query), timeout=7.0)
+                products = store["parse"](resp.text)
                 
-            results.append({
-                "title": title.strip(),
-                "price": price.strip(),
-                "link": link
-            })
-            
-        return results
+                yield f"data: {json.dumps({'type': 'status', 'site': store['name'], 'state': 'done', 'count': len(products)})}\n\n"
+                if products:
+                    yield f"data: {json.dumps({'type': 'result', 'site': store['name'], 'products': products})}\n\n"
+            except Exception:
+                yield f"data: {json.dumps({'type': 'status', 'site': store['name'], 'state': 'done', 'count': 0})}\n\n"
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-@app.route("/search", methods=["POST"])
-def search():
-    data = request.get_json() or {}
-    query = data.get("query", "")
-    
-    if not query:
-        return jsonify({"error": "Query parameter is required"}), 400
-    
-    try:
-        # Run async Camoufox scraper in synchronous Flask route
-        results = asyncio.run(fetch_robo_in_details(query))
-        return jsonify({"success": True, "data": results})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+@app.get("/api/search")
+async def search(q: str):
+    return StreamingResponse(event_generator(q), media_type="text/event-stream")
