@@ -7,15 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import httpx
 from bs4 import BeautifulSoup
-from camufox import AsyncCamufox
+from camoufox.async_api import AsyncCamoufox
 
 camufox_browser = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global camufox_browser
-    # Initialize Camufox browser with memory flags suitable for Render
-    camufox_browser = AsyncCamufox(
+    camufox_browser = AsyncCamoufox(
         headless=True,
         args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"]
     )
