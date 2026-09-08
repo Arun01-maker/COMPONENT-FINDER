@@ -1,9 +1,11 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from camoufox.async_api import AsyncCamoufox
+import asyncio
+import json
 
 # Global reference for browser instance
 camoufox_browser = None
@@ -58,6 +60,50 @@ async def scrape_url(url: str):
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/search")
+async def api_search(q: str):
+    """Server-Sent Events (SSE) endpoint expected by the frontend's EventSource.
+
+    This returns a small simulated stream of events with the same message
+    shapes the frontend expects: init, status, result, done.
+
+    If camoufox_browser is available you can extend this to perform
+    real scrapes and emit real product results.
+    """
+    async def event_generator():
+        sites = ["Mouser", "Digi-Key", "Element14"]
+        # init event with list of sites
+        yield f"data: {json.dumps({'type':'init','sites':sites})}\n\n"
+        await asyncio.sleep(0.2)
+
+        for site in sites:
+            # searching status
+            yield f"data: {json.dumps({'type':'status','site':site,'state':'searching'})}\n\n"
+            await asyncio.sleep(0.4)
+
+            # simulated result count and product(s)
+            count = 1
+            products = [{
+                'title': f"{q} - Generic Listing",
+                'price': '₹99',
+                'link': f"https://example.com/{q.replace(' ', '%20')}"
+            }]
+
+            # done status for this site
+            yield f"data: {json.dumps({'type':'status','site':site,'state':'done','count':count})}\n\n"
+            await asyncio.sleep(0.15)
+
+            # send result(s)
+            yield f"data: {json.dumps({'type':'result','site':site,'products':products})}\n\n"
+            await asyncio.sleep(0.2)
+
+        # final done event
+        yield f"data: {json.dumps({'type':'done'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type='text/event-stream')
+
 
 if __name__ == "__main__":
     import uvicorn
