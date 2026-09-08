@@ -8,7 +8,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from bs4 import BeautifulSoup
 import httpx
-from camoufox.async_api import AsyncCamoufox
 
 # Persistent browser instance
 camoufox_browser = None
@@ -17,7 +16,7 @@ camoufox_browser = None
 async def lifespan(app: FastAPI):
     global camoufox_browser
     try:
-        # Launch Camoufox headless browser on server boot
+        from camoufox.async_api import AsyncCamoufox
         camoufox_browser = AsyncCamoufox(
             headless=True,
             args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"]
@@ -25,11 +24,11 @@ async def lifespan(app: FastAPI):
         await camoufox_browser.__aenter__()
         print("Camoufox browser successfully started.")
     except Exception as e:
-        print(f"Camoufox startup warning: {e}")
+        print(f"Camoufox startup failed (running in fallback mode): {e}")
+        camoufox_browser = None
 
     yield
 
-    # Clean up browser on shutdown
     if camoufox_browser:
         try:
             await camoufox_browser.__aexit__(None, None, None)
@@ -39,7 +38,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Component Finder API", lifespan=lifespan)
 
-# Enable CORS for web frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,7 +51,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# --- Scraper 1: ET Store (HTTPX) ---
+# --- Scraper 1: ET Store (httpx) ---
 async def scrape_etstore(client: httpx.AsyncClient, query: str):
     results = []
     encoded_query = urllib.parse.quote(query)
@@ -82,45 +80,54 @@ async def scrape_etstore(client: httpx.AsyncClient, query: str):
     
     return results
 
-# --- Scraper 2: Robu.in (Camoufox) ---
-async def scrape_robu(query: str):
+# --- Scraper 2: Robu.in (Camoufox with HTTP Fallback) ---
+async def scrape_robu(client: httpx.AsyncClient, query: str):
     results = []
-    if not camoufox_browser:
-        print("Camoufox browser is not available.")
-        return results
-
     encoded_query = urllib.parse.quote(query)
     url = f"https://robu.in/?s={encoded_query}&post_type=product"
-    
+
+    # Attempt using Camoufox browser if initialized
+    if camoufox_browser:
+        try:
+            page = await camoufox_browser.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            content = await page.content()
+            await page.close()
+            return parse_robu_html(content)
+        except Exception as e:
+            print(f"Camoufox failed for Robu.in, falling back to HTTP request: {e}")
+
+    # Fallback to direct HTTP fetch
     try:
-        page = await camoufox_browser.new_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        
-        content = await page.content()
-        await page.close()
-        
-        soup = BeautifulSoup(content, "html.parser")
-        products = soup.select(".product") or soup.select(".product-inner")
-        
-        for prod in products[:10]:
-            title_elem = (
-                prod.select_one(".product-title") 
-                or prod.select_one("h2") 
-                or prod.select_one(".woocommerce-loop-product__title")
-            )
-            price_elem = prod.select_one(".price")
-            link_elem = prod.select_one("a")
-            
-            if title_elem and link_elem:
-                results.append({
-                    "distributor": "Robu.in",
-                    "title": title_elem.text.strip(),
-                    "price": price_elem.text.strip() if price_elem else "N/A",
-                    "link": link_elem.get("href", "")
-                })
+        response = await client.get(url, headers=HEADERS, timeout=10.0)
+        if response.status_code == 200:
+            return parse_robu_html(response.text)
     except Exception as e:
-        print(f"Robu.in Camoufox scraping error: {e}")
+        print(f"Robu HTTP fallback error: {e}")
+
+    return results
+
+def parse_robu_html(html_content: str):
+    results = []
+    soup = BeautifulSoup(html_content, "html.parser")
+    products = soup.select(".product") or soup.select(".product-inner")
+    
+    for prod in products[:10]:
+        title_elem = (
+            prod.select_one(".product-title") 
+            or prod.select_one("h2") 
+            or prod.select_one(".woocommerce-loop-product__title")
+        )
+        price_elem = prod.select_one(".price")
+        link_elem = prod.select_one("a")
         
+        if title_elem and link_elem:
+            results.append({
+                "distributor": "Robu.in",
+                "title": title_elem.text.strip(),
+                "price": price_elem.text.strip() if price_elem else "N/A",
+                "link": link_elem.get("href", "")
+            })
     return results
 
 @app.get("/", response_class=HTMLResponse)
@@ -137,7 +144,7 @@ async def search_parts(q: str = Query("", description="Search component")):
         
     async with httpx.AsyncClient(follow_redirects=True) as client:
         et_task = asyncio.create_task(scrape_etstore(client, q))
-        robu_task = asyncio.create_task(scrape_robu(q))
+        robu_task = asyncio.create_task(scrape_robu(client, q))
         
         et_results, robu_results = await asyncio.gather(et_task, robu_task)
     
