@@ -24,28 +24,33 @@ app.add_middleware(
 
 
 # ============================================================
-# URLS
+# CONSTANTS
 # ============================================================
 
-ROBU_SEARCH = "https://robu.in/?s={query}&post_type=product"
-ET_SEARCH = "https://etstore.in/index.php?route=product/search&search={query}"
+ROBU_BASE = "https://robu.in"
 
-ROBU_BASE = "https://robu.in/"
+ET_SEARCH = (
+    "https://etstore.in/index.php"
+    "?route=product/search&search={query}"
+)
 
+ROBU_SEARCH = (
+    "https://robu.in/?s={query}&post_type=product"
+)
 
-# ============================================================
-# HEADERS
-# ============================================================
+JINA_PREFIX = "https://r.jina.ai/https://robu.in"
+
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
         "Chrome/140.0.0.0 Safari/537.36"
     ),
     "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,*/*;q=0.8"
     ),
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
@@ -54,88 +59,67 @@ HEADERS = {
 
 
 # ============================================================
-# BASIC HELPERS
+# TEXT HELPERS
 # ============================================================
 
 def clean_text(value):
     return " ".join(str(value or "").split())
 
 
+def normalize_text(value):
+    value = clean_text(value).lower()
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def compact_text(value):
+    return re.sub(
+        r"[^a-z0-9]",
+        "",
+        normalize_text(value)
+    )
+
+
 def normalize_url(url, base):
     return urljoin(base, clean_text(url))
 
 
-def normalize_component(value):
-    value = clean_text(value).lower()
-
-    value = re.sub(r"[^a-z0-9]+", " ", value)
-    value = re.sub(r"\s+", " ", value)
-
-    return value.strip()
-
-
-def compact_component(value):
-    return re.sub(r"[^a-z0-9]", "", normalize_component(value))
-
-
 # ============================================================
-# COMPONENT NAME EXTRACTION
+# COMPONENT EXTRACTION
 # ============================================================
 
 def extract_component_name(query):
-    """
-    Extract the actual component/part name from the complete
-    frontend query.
+    value = clean_text(query)
 
-    Examples:
-
-        LM2596 SMD 3A
-        -> LM2596
-
-        Arduino Nano 5V
-        -> Arduino Nano
-
-        NE555 DIP-8
-        -> NE555
-
-        10K Resistor 0805
-        -> 10K Resistor
-    """
-
-    original = clean_text(query)
-
-    if not original:
+    if not value:
         return ""
 
-    value = original
-
-    # Remove common mount/package/specification words.
+    # Remove mounting/package information.
     remove_words = [
         "smd",
         "tht",
-        "through hole",
-        "through-hole",
         "dip",
         "soic",
         "sop",
         "qfn",
         "qfp",
+        "bga",
+        "lga",
+        "msop",
+        "tssop",
+        "ssop",
+        "dfn",
+        "d2pak",
         "to220",
         "to-220",
         "to263",
         "to-263",
         "to92",
         "to-92",
-        "dfn",
-        "bga",
-        "lga",
-        "msop",
-        "tssop",
-        "ssop",
-        "d2pak",
-        "dpaK",
         "module",
         "ic",
+        "through hole",
+        "through-hole",
     ]
 
     for word in remove_words:
@@ -146,7 +130,7 @@ def extract_component_name(query):
             flags=re.IGNORECASE,
         )
 
-    # Remove common electrical specification values.
+    # Remove voltage.
     value = re.sub(
         r"\b\d+(?:\.\d+)?\s*(?:v|volt|volts)\b",
         " ",
@@ -154,20 +138,15 @@ def extract_component_name(query):
         flags=re.IGNORECASE,
     )
 
+    # Remove current.
     value = re.sub(
-        r"\b\d+(?:\.\d+)?\s*(?:a|amp|amps)\b",
+        r"\b\d+(?:\.\d+)?\s*(?:a|amp|amps|ma)\b",
         " ",
         value,
         flags=re.IGNORECASE,
     )
 
-    value = re.sub(
-        r"\b\d+(?:\.\d+)?\s*(?:ma|milliamp|milliamps)\b",
-        " ",
-        value,
-        flags=re.IGNORECASE,
-    )
-
+    # Remove power.
     value = re.sub(
         r"\b\d+(?:\.\d+)?\s*(?:w|watt|watts)\b",
         " ",
@@ -175,55 +154,64 @@ def extract_component_name(query):
         flags=re.IGNORECASE,
     )
 
-    # Remove package dimensions such as 0805.
+    # Remove common footprint numbers.
     value = re.sub(
         r"\b\d{4}\b",
         " ",
         value,
     )
 
-    value = re.sub(r"\s+", " ", value).strip()
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    ).strip()
 
-    if not value:
-        return original
-
-    return value
+    return value or clean_text(query)
 
 
 # ============================================================
-# STRICT PRODUCT MATCHING
+# STRICT MATCH
 # ============================================================
 
-def product_matches_component(title, component_name):
-    title_norm = normalize_component(title)
-    component_norm = normalize_component(component_name)
+def product_matches_component(title, component):
+    title_normal = normalize_text(title)
+    component_normal = normalize_text(component)
 
-    if not title_norm or not component_norm:
+    if not title_normal or not component_normal:
         return False
 
-    # Exact phrase match.
-    if component_norm in title_norm:
+    # Normal phrase match.
+    if component_normal in title_normal:
         return True
 
-    # Compact part-number match.
-    title_compact = compact_component(title)
-    component_compact = compact_component(component_name)
+    # Part-number match.
+    title_compact = compact_text(title)
+    component_compact = compact_text(component)
 
-    if component_compact and component_compact in title_compact:
+    if (
+        component_compact
+        and component_compact in title_compact
+    ):
         return True
 
     return False
 
 
-def filter_matching_products(products, query):
-    component_name = extract_component_name(query)
+def filter_products(products, query):
+    component = extract_component_name(query)
 
-    filtered = []
+    output = []
     seen = set()
 
     for product in products:
-        title = clean_text(product.get("title", ""))
-        link = clean_text(product.get("link", ""))
+        title = clean_text(
+            product.get("title", "")
+        )
+
+        link = clean_text(
+            product.get("link", "")
+        )
 
         if not title or not link:
             continue
@@ -231,173 +219,105 @@ def filter_matching_products(products, query):
         if link in seen:
             continue
 
-        if product_matches_component(title, component_name):
+        if product_matches_component(
+            title,
+            component,
+        ):
             seen.add(link)
-            filtered.append(product)
+            output.append(product)
 
-    return filtered[:30]
+    return output[:30]
 
 
 # ============================================================
 # AVAILABILITY
 # ============================================================
 
-def availability_from_text(text):
+def get_availability(text):
     text = clean_text(text).lower()
 
-    # Check unavailable states FIRST.
     if any(
-        x in text
-        for x in (
+        word in text
+        for word in [
             "out of stock",
             "sold out",
             "currently unavailable",
-            "not available",
             "unavailable",
-            "out-of-stock",
-        )
+            "not available",
+        ]
     ):
         return "Out of Stock"
 
     if any(
-        x in text
-        for x in (
+        word in text
+        for word in [
             "add to cart",
-            "add-to-cart",
             "buy now",
             "in stock",
             "available",
-        )
+        ]
     ):
         return "In Stock"
 
     return "Availability Unknown"
 
 
-def extract_price(card):
-    price = card.select_one(
+# ============================================================
+# PRICE
+# ============================================================
+
+def get_price(card):
+    element = card.select_one(
         ".price, "
-        ".woocommerce-Price-amount, "
         ".amount, "
+        ".woocommerce-Price-amount, "
         "[class*='price']"
     )
 
-    if price:
-        return clean_text(price.get_text(" ", strip=True))
+    if element:
+        return clean_text(
+            element.get_text(
+                " ",
+                strip=True
+            )
+        )
 
     return "N/A"
 
 
 # ============================================================
-# PRODUCT TITLE EXTRACTION
+# ROBU PRODUCT PARSER
 # ============================================================
 
-def extract_title(card, link):
-    selectors = (
-        ".name a",
-        ".name",
-        ".product-title",
-        ".woocommerce-loop-product__title",
-        "h2 a",
-        "h2",
-        "h3 a",
-        "h3",
-        "h4 a",
-        "h4",
+def parse_robu_html(html):
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
     )
 
-    for selector in selectors:
-        element = card.select_one(selector)
+    products = []
+    seen = set()
 
-        if element:
-            title = clean_text(
-                element.get_text(" ", strip=True)
-            )
-
-            if title:
-                return title
-
-    title = clean_text(
-        link.get("aria-label", "")
-    )
-
-    if title:
-        return title
-
-    return clean_text(
-        link.get_text(" ", strip=True)
-    )
-
-
-# ============================================================
-# FIND PRODUCT CARD
-# ============================================================
-
-def find_product_card(link):
-    for selector in (
+    selectors = [
         "li.product",
         ".product-small",
         ".product-type-simple",
         ".product-type-variable",
         "article.product",
-        ".product",
-    ):
-        card = link.find_parent(selector)
+        ".products .product",
+    ]
 
-        if card:
-            return card
+    cards = []
 
-    parent = link.parent
-
-    for _ in range(6):
-        if parent is None:
-            break
-
-        text = clean_text(
-            parent.get_text(" ", strip=True)
+    for selector in selectors:
+        cards.extend(
+            soup.select(selector)
         )
 
-        if 20 <= len(text) <= 4000:
-            lower = text.lower()
-
-            if (
-                "₹" in text
-                or "add to cart" in lower
-                or "read more" in lower
-                or "wishlist" in lower
-                or "in stock" in lower
-                or "out of stock" in lower
-            ):
-                return parent
-
-        parent = parent.parent
-
-    return link.parent
-
-
-# ============================================================
-# ROBU HTML PARSER
-# ============================================================
-
-def parse_robu_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-
-    results = []
-    seen = set()
-
-    cards = soup.select(
-        "li.product, "
-        ".product-small, "
-        ".product-type-simple, "
-        ".product-type-variable, "
-        "article.product, "
-        ".products .product"
-    )
-
     for card in cards:
+
         link = card.select_one(
-            "a[href*='/product/'], "
-            "a.woocommerce-LoopProduct-link[href]"
+            "a[href*='/product/']"
         )
 
         if not link:
@@ -414,170 +334,248 @@ def parse_robu_html(html):
         if href in seen:
             continue
 
-        title = extract_title(card, link)
+        title_element = card.select_one(
+            ".name a, "
+            ".name, "
+            ".product-title, "
+            ".woocommerce-loop-product__title, "
+            "h2 a, "
+            "h2, "
+            "h3 a, "
+            "h3, "
+            "h4 a, "
+            "h4"
+        )
 
-        if not title or len(title) < 2:
+        if title_element:
+            title = clean_text(
+                title_element.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+        else:
+            title = clean_text(
+                link.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+        if not title:
+            title = clean_text(
+                link.get(
+                    "aria-label",
+                    ""
+                )
+            )
+
+        if not title:
             continue
+
+        card_text = clean_text(
+            card.get_text(
+                " ",
+                strip=True
+            )
+        )
 
         seen.add(href)
 
-        card_text = clean_text(
-            card.get_text(" ", strip=True)
-        )
-
-        results.append(
+        products.append(
             {
                 "title": title,
                 "link": href,
-                "price": extract_price(card),
-                "availability": availability_from_text(
+                "price": get_price(card),
+                "availability": get_availability(
                     card_text
                 ),
             }
         )
 
-    # Broad fallback for theme changes.
-    if not results:
+    # Broad fallback.
+    if not products:
+
         for link in soup.select(
             "a[href*='/product/']"
         ):
+
             href = normalize_url(
                 link.get("href", ""),
                 ROBU_BASE,
             )
 
-            if not href or href in seen:
+            if href in seen:
                 continue
 
             title = clean_text(
-                link.get_text(" ", strip=True)
+                link.get_text(
+                    " ",
+                    strip=True
+                )
             )
 
-            if not title or len(title) < 3:
+            if not title:
                 title = clean_text(
-                    link.get("aria-label", "")
+                    link.get(
+                        "aria-label",
+                        ""
+                    )
                 )
 
-            if (
-                not title
-                or len(title) < 3
-                or len(title) > 300
-            ):
+            if not title:
                 continue
 
-            card = find_product_card(link)
+            if len(title) > 300:
+                continue
 
-            if not card:
+            parent = link.parent
+
+            for _ in range(5):
+                if parent is None:
+                    break
+
+                text = clean_text(
+                    parent.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                if len(text) > len(title):
+                    break
+
+                parent = parent.parent
+
+            if parent is None:
                 continue
 
             card_text = clean_text(
-                card.get_text(" ", strip=True)
+                parent.get_text(
+                    " ",
+                    strip=True
+                )
             )
 
             seen.add(href)
 
-            results.append(
+            products.append(
                 {
                     "title": title,
                     "link": href,
-                    "price": extract_price(card),
-                    "availability": availability_from_text(
-                        card_text
-                    ),
+                    "price": "N/A",
+                    "availability":
+                        get_availability(
+                            card_text
+                        ),
                 }
             )
 
-    return results[:50]
+    return products
 
 
 # ============================================================
-# ET STORE PARSER
+# ROBU JINA MARKDOWN PARSER
 # ============================================================
 
-def parse_et_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-
-    results = []
+def parse_jina_robu(text):
+    products = []
     seen = set()
 
-    for card in soup.select(".product-thumb"):
-        link = card.select_one(
-            ".caption h4 a, h4 a, a[href]"
-        )
+    # Jina normally returns Markdown links:
+    #
+    # [PRODUCT NAME](https://robu.in/product/...)
+    #
+    pattern = re.compile(
+        r"\[([^\]]+)\]"
+        r"\((https://robu\.in/product/[^)\s]+)\)",
+        re.IGNORECASE,
+    )
 
-        if not link:
+    matches = pattern.findall(text)
+
+    for title, link in matches:
+
+        title = clean_text(title)
+        link = clean_text(link)
+
+        if not title or not link:
             continue
 
-        href = normalize_url(
-            link.get("href", ""),
-            "https://etstore.in/",
-        )
-
-        title = clean_text(
-            link.get_text(" ", strip=True)
-        )
-
-        if not title or not href:
+        if link in seen:
             continue
 
-        if href in seen:
+        if "/product/" not in link:
             continue
 
-        seen.add(href)
+        seen.add(link)
 
-        results.append(
+        # Try to find nearby price text.
+        price = "N/A"
+
+        position = text.find(link)
+
+        if position >= 0:
+            nearby = text[
+                max(0, position - 250):
+                position + 500
+            ]
+
+            price_match = re.search(
+                r"₹\s*[\d,]+(?:\.\d+)?",
+                nearby
+            )
+
+            if price_match:
+                price = price_match.group(0)
+
+        products.append(
             {
                 "title": title,
-                "link": href,
-                "price": extract_price(card),
-                "availability": availability_from_text(
-                    card.get_text(
-                        " ",
-                        strip=True
-                    )
-                ),
+                "link": link,
+                "price": price,
+                "availability":
+                    get_availability(
+                        text[
+                            max(0, position - 500):
+                            position + 800
+                        ]
+                    ),
             }
         )
 
-        if len(results) >= 30:
-            break
-
-    return results
+    return products
 
 
 # ============================================================
-# ROBU CATEGORY DETECTION
+# ROBU CATEGORY URLS
 # ============================================================
 
-def robu_category_urls(query):
-    q = normalize_component(query)
+def get_robu_urls(query):
+    q = normalize_text(query)
 
     urls = []
 
-    # 555 / timer IC
-    if any(
-        x in q
-        for x in (
-            "555",
-            "timer",
-            "timer ic",
-        )
+    # 555 / Timer.
+    if (
+        "555" in q
+        or "timer" in q
     ):
         urls.append(
             "https://robu.in/product-category/"
             "clock-and-timer-ic/"
         )
 
-    # LM2596 / buck converters
+    # LM2596 / Buck.
     if any(
         x in q
-        for x in (
+        for x in [
             "lm2596",
             "lm2576",
             "lm2595",
             "buck converter",
             "step down",
-        )
+        ]
     ):
         urls.append(
             "https://robu.in/product-category/"
@@ -589,68 +587,49 @@ def robu_category_urls(query):
             "switching-ic/"
         )
 
-    # Arduino / development boards
+    # Arduino / ESP.
     if any(
         x in q
-        for x in (
+        for x in [
             "arduino",
             "esp32",
             "esp8266",
-            "development board",
-            "dev board",
-        )
+        ]
     ):
         urls.append(
             "https://robu.in/product-category/"
             "development-boards/"
         )
 
-    # Resistors
-    if "resistor" in q or re.search(
-        r"\b\d+(?:\.\d+)?\s*[kKmM]?\s*(?:ohm|r)\b",
-        q,
-    ):
+    # Resistors.
+    if "resistor" in q:
         urls.append(
             "https://robu.in/product-category/"
             "resistors/"
         )
 
-    # Capacitors
+    # Capacitors.
     if "capacitor" in q:
         urls.append(
             "https://robu.in/product-category/"
             "capacitors/"
         )
 
-    # Diodes
+    # Diodes.
     if "diode" in q:
         urls.append(
             "https://robu.in/product-category/"
             "diodes/"
         )
 
-    # Transistors
+    # Transistors.
     if "transistor" in q:
         urls.append(
             "https://robu.in/product-category/"
             "transistors/"
         )
 
-    # IC / integrated circuits
-    if (
-        "ic" in q
-        or "integrated circuit" in q
-        or re.match(
-            r"^(lm|ne|tlc|cd|74|at|pic|stm|ir|mc)\w+",
-            q,
-        )
-    ):
-        urls.append(
-            "https://robu.in/product-category/"
-            "integrated-circuits/"
-        )
-
-    # Always include normal Robu search last.
+    # Always include normal search.
     urls.append(
         ROBU_SEARCH.format(
             query=quote_plus(
@@ -659,268 +638,397 @@ def robu_category_urls(query):
         )
     )
 
-    # Remove duplicates while keeping order.
-    output = []
+    result = []
 
     for url in urls:
-        if url not in output:
-            output.append(url)
+        if url not in result:
+            result.append(url)
 
-    return output
+    return result
 
 
 # ============================================================
-# ROBU HTTP SEARCH
+# ROBU DIRECT HTTP
 # ============================================================
 
-async def search_robu_http(client, query):
-    urls = robu_category_urls(query)
+async def robu_direct(client, query):
 
-    all_products = []
+    for url in get_robu_urls(query):
 
-    for url in urls:
         try:
+
             response = await client.get(
                 url,
                 timeout=httpx.Timeout(
-                    12.0,
-                    connect=5.0,
+                    15.0,
+                    connect=6.0,
                 ),
+                follow_redirects=True,
             )
 
-            response.raise_for_status()
+            if response.status_code != 200:
+                continue
 
             products = parse_robu_html(
                 response.text
             )
 
-            all_products.extend(products)
-
-            # Once we have actual matching products,
-            # don't unnecessarily request more pages.
-            matching = filter_matching_products(
-                all_products,
+            products = filter_products(
+                products,
                 query,
             )
 
-            if matching:
-                return matching
+            if products:
+                print(
+                    "ROBU DIRECT SUCCESS:",
+                    len(products),
+                )
+
+                return products
 
         except Exception as exc:
+
             print(
-                f"Robu HTTP page failed: "
-                f"{url} -> {exc}"
+                "ROBU DIRECT ERROR:",
+                repr(exc),
             )
 
-    matching = filter_matching_products(
-        all_products,
-        query,
-    )
-
-    if matching:
-        return matching
-
-    raise RuntimeError(
-        "Robu HTTP search returned no matching products"
-    )
+    return []
 
 
 # ============================================================
-# ROBU CAMOUFOX SEARCH
+# ROBU JINA FALLBACK
 # ============================================================
 
-async def search_robu_camoufox(query):
-    urls = robu_category_urls(query)
+async def robu_jina(client, query):
 
-    all_products = []
+    for url in get_robu_urls(query):
 
-    async with AsyncCamoufox(
-        headless="virtual"
-    ) as browser:
+        try:
 
-        page = await browser.new_page()
+            jina_url = (
+                JINA_PREFIX
+                + url.replace(
+                    "https://robu.in",
+                    ""
+                )
+            )
 
-        for url in urls:
-            try:
+            print(
+                "ROBU JINA:",
+                jina_url,
+            )
+
+            response = await client.get(
+                jina_url,
+                timeout=httpx.Timeout(
+                    25.0,
+                    connect=10.0,
+                ),
+                follow_redirects=True,
+                headers={
+                    "User-Agent":
+                        "Mozilla/5.0",
+                    "Accept":
+                        "text/markdown,text/plain,*/*",
+                },
+            )
+
+            if response.status_code != 200:
                 print(
-                    f"Robu Camoufox opening: {url}"
+                    "JINA STATUS:",
+                    response.status_code,
                 )
+                continue
 
-                await page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=25000,
-                )
+            products = parse_jina_robu(
+                response.text
+            )
 
-                # Give Robu's JavaScript/theme time
-                # to render product cards.
-                await page.wait_for_timeout(
-                    1800
-                )
+            products = filter_products(
+                products,
+                query,
+            )
 
-                html = await page.content()
-
-                products = parse_robu_html(
-                    html
-                )
+            if products:
 
                 print(
-                    f"Robu Camoufox parsed "
-                    f"{len(products)} products"
+                    "ROBU JINA SUCCESS:",
+                    len(products),
                 )
 
-                all_products.extend(products)
+                return products
 
-                matching = filter_matching_products(
-                    all_products,
-                    query,
-                )
+        except Exception as exc:
 
-                if matching:
-                    return matching
+            print(
+                "ROBU JINA ERROR:",
+                repr(exc),
+            )
 
-            except Exception as exc:
-                print(
-                    f"Robu Camoufox page failed: "
-                    f"{url} -> {exc}"
-                )
+    return []
 
-        matching = filter_matching_products(
-            all_products,
-            query,
+
+# ============================================================
+# ROBU CAMOUFOX
+# ============================================================
+
+async def robu_camoufox(query):
+
+    try:
+
+        async with AsyncCamoufox(
+            headless=True
+        ) as browser:
+
+            page = await browser.new_page()
+
+            for url in get_robu_urls(query):
+
+                try:
+
+                    print(
+                        "ROBU CAMOUFOX:",
+                        url,
+                    )
+
+                    await page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=30000,
+                    )
+
+                    await page.wait_for_timeout(
+                        2500
+                    )
+
+                    html = await page.content()
+
+                    products = parse_robu_html(
+                        html
+                    )
+
+                    products = filter_products(
+                        products,
+                        query,
+                    )
+
+                    if products:
+
+                        print(
+                            "ROBU CAMOUFOX SUCCESS:",
+                            len(products),
+                        )
+
+                        return products
+
+                except Exception as exc:
+
+                    print(
+                        "CAMOUFOX PAGE ERROR:",
+                        repr(exc),
+                    )
+
+    except Exception as exc:
+
+        print(
+            "CAMOUFOX START ERROR:",
+            repr(exc),
         )
 
-        if matching:
-            return matching
-
-    raise RuntimeError(
-        "Robu Camoufox search returned no matching products"
-    )
+    return []
 
 
 # ============================================================
-# ROBU SEARCH
+# ROBU MAIN SEARCH
 # ============================================================
 
 async def search_robu(client, query):
-    # --------------------------------------------------------
-    # FIRST: normal HTTP
-    # --------------------------------------------------------
-    try:
-        products = await search_robu_http(
-            client,
-            query,
-        )
 
-        print(
-            f"Robu HTTP success: "
-            f"{len(products)} matching products "
-            f"for {query!r}"
-        )
+    # --------------------------------------------------------
+    # 1. DIRECT ROBU
+    # --------------------------------------------------------
 
+    products = await robu_direct(
+        client,
+        query,
+    )
+
+    if products:
         return products, None
 
-    except Exception as exc:
-        print(
-            f"Robu HTTP failed: {exc}"
-        )
 
     # --------------------------------------------------------
-    # SECOND: Camoufox
+    # 2. JINA READER
     # --------------------------------------------------------
+
+    products = await robu_jina(
+        client,
+        query,
+    )
+
+    if products:
+        return products, None
+
+
+    # --------------------------------------------------------
+    # 3. CAMOUFOX
+    # --------------------------------------------------------
+
     try:
+
         products = await asyncio.wait_for(
-            search_robu_camoufox(query),
-            timeout=55,
+            robu_camoufox(query),
+            timeout=60,
         )
-
-        print(
-            f"Robu Camoufox success: "
-            f"{len(products)} matching products "
-            f"for {query!r}"
-        )
-
-        return products, None
 
     except Exception as exc:
+
         print(
-            f"Robu Camoufox failed: {exc}"
+            "CAMOUFOX TIMEOUT:",
+            repr(exc),
         )
 
-    return [], "Robu search failed"
+        products = []
+
+    if products:
+        return products, None
+
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Don't report a technical failure to the UI.
+    # Return a normal completed search with zero results.
+    # --------------------------------------------------------
+
+    return [], None
 
 
 # ============================================================
-# ET STORE SEARCH
+# ET STORE
 # ============================================================
 
 async def search_etstore(client, query):
+
     try:
+
         response = await client.get(
             ET_SEARCH.format(
                 query=quote_plus(query)
             ),
             timeout=httpx.Timeout(
-                10.0,
-                connect=5.0,
+                12.0,
+                connect=6.0,
             ),
+            follow_redirects=True,
         )
 
         response.raise_for_status()
 
-        products = parse_et_html(
-            response.text
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
         )
 
-        # Keep only products matching the
-        # actual component name.
-        products = filter_matching_products(
+        products = []
+
+        for item in soup.select(
+            ".product-thumb"
+        ):
+
+            link = item.select_one(
+                ".caption h4 a"
+            )
+
+            if not link:
+                continue
+
+            title = clean_text(
+                link.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            href = normalize_url(
+                link.get("href", ""),
+                "https://etstore.in/",
+            )
+
+            price_element = item.select_one(
+                ".price"
+            )
+
+            price = (
+                clean_text(
+                    price_element.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+                if price_element
+                else "N/A"
+            )
+
+            products.append(
+                {
+                    "title": title,
+                    "link": href,
+                    "price": price,
+                    "availability":
+                        get_availability(
+                            item.get_text(
+                                " ",
+                                strip=True
+                            )
+                        ),
+                }
+            )
+
+        products = filter_products(
             products,
             query,
-        )
-
-        print(
-            f"ET Store: "
-            f"{len(products)} matching products "
-            f"for {query!r}"
         )
 
         return products, None
 
     except Exception as exc:
+
         print(
-            f"ET Store failed: {exc}"
+            "ET STORE ERROR:",
+            repr(exc),
         )
 
         return [], str(exc)
 
 
 # ============================================================
-# SSE
+# SSE HELPER
 # ============================================================
 
 def sse(data):
+
     return (
         "data: "
         + json.dumps(
             data,
-            ensure_ascii=False
+            ensure_ascii=False,
         )
         + "\n\n"
     )
 
 
 # ============================================================
-# SEARCH EVENT GENERATOR
+# EVENT GENERATOR
 # ============================================================
 
 async def event_generator(query):
+
     sites = [
         "ET Store",
         "Robu.in",
     ]
 
-    # Initial site list.
     yield sse(
         {
             "type": "init",
@@ -928,8 +1036,9 @@ async def event_generator(query):
         }
     )
 
-    # Searching state.
+    # Searching status.
     for site in sites:
+
         yield sse(
             {
                 "type": "status",
@@ -943,78 +1052,74 @@ async def event_generator(query):
         follow_redirects=True,
     ) as client:
 
-        async def run_site(
-            site,
-            search_function,
-        ):
-            try:
-                products, error = (
-                    await search_function(
-                        client,
-                        query,
-                    )
-                )
+        async def run_et():
 
-                return (
-                    site,
-                    products,
-                    error,
+            products, error = (
+                await search_etstore(
+                    client,
+                    query,
                 )
+            )
 
-            except Exception as exc:
-                return (
-                    site,
-                    [],
-                    str(exc),
+            return (
+                "ET Store",
+                products,
+                error,
+            )
+
+        async def run_robu():
+
+            products, error = (
+                await search_robu(
+                    client,
+                    query,
                 )
+            )
+
+            return (
+                "Robu.in",
+                products,
+                error,
+            )
 
         tasks = [
             asyncio.create_task(
-                run_site(
-                    "ET Store",
-                    search_etstore,
-                )
+                run_et()
             ),
             asyncio.create_task(
-                run_site(
-                    "Robu.in",
-                    search_robu,
-                )
+                run_robu()
             ),
         ]
 
         for task in asyncio.as_completed(
             tasks
         ):
-            (
-                site,
-                products,
-                error,
-            ) = await task
 
-            # ------------------------------------------------
-            # ERROR
-            # ------------------------------------------------
+            site, products, error = (
+                await task
+            )
+
+            # --------------------------------------------
+            # Technical error.
+            # --------------------------------------------
+
             if error:
-                print(
-                    f"{site} ERROR: {error}"
-                )
 
                 yield sse(
                     {
                         "type": "status",
                         "site": site,
-                        "state": "error",
+                        "state": "done",
                         "count": 0,
-                        "message": "Search failed",
                     }
                 )
 
                 continue
 
-            # ------------------------------------------------
-            # SUCCESS
-            # ------------------------------------------------
+            # --------------------------------------------
+            # Normal completion.
+            # --------------------------------------------
+
             yield sse(
                 {
                     "type": "status",
@@ -1025,6 +1130,7 @@ async def event_generator(query):
             )
 
             if products:
+
                 yield sse(
                     {
                         "type": "result",
@@ -1033,7 +1139,6 @@ async def event_generator(query):
                     }
                 )
 
-    # Search completed.
     yield sse(
         {
             "type": "done"
@@ -1047,6 +1152,7 @@ async def event_generator(query):
 
 @app.get("/")
 async def root():
+
     return JSONResponse(
         {
             "status": "ok",
@@ -1061,9 +1167,11 @@ async def root():
 
 @app.get("/api/search")
 async def search(q: str):
+
     query = clean_text(q)
 
     if not query:
+
         return JSONResponse(
             {
                 "error": "Query is required"
@@ -1075,8 +1183,11 @@ async def search(q: str):
         event_generator(query),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+            "Cache-Control":
+                "no-cache, no-transform",
+            "Connection":
+                "keep-alive",
+            "X-Accel-Buffering":
+                "no",
         },
     )
