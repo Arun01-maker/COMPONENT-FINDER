@@ -134,10 +134,18 @@ select.control-input{appearance:auto;cursor:pointer}
 </style>
 </head>
 <body>
+
 <div class="app-shell">
+
   <aside class="sidebar">
+
     <div class="side-brand">
-      <div class="brand-icon"><span></span><span></span><span></span></div>
+      <div class="brand-icon">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+
       <div>
         <div class="brand-name">Component Finder</div>
         <div class="brand-sub">PARAMETRIC SEARCH</div>
@@ -146,264 +154,944 @@ select.control-input{appearance:auto;cursor:pointer}
 
     <div class="side-section">
       <div class="side-label">SEARCH TOOLS</div>
-      <div class="side-item active"><span class="side-dot"></span>Parts Search</div>
-      <div class="side-item"><span class="side-dot"></span>Live Inventory</div>
-      <div class="side-item"><span class="side-dot"></span>Specifications</div>
+
+      <div class="side-item active">
+        <span class="side-dot"></span>
+        Parts Search
+      </div>
+
+      <div class="side-item">
+        <span class="side-dot"></span>
+        Live Inventory
+      </div>
+
+      <div class="side-item">
+        <span class="side-dot"></span>
+        Specifications
+      </div>
     </div>
 
     <div class="side-section">
+
       <div class="side-label">QUICK PARTS</div>
-      <button type="button" class="side-quick" onclick="applyQuick('ESP32', '', '3.3V', '', '')">
-        <span>ESP32</span><small>3.3V</small>
+
+      <button
+        type="button"
+        class="side-quick"
+        onclick="applyQuick('ESP32', '', '3.3V', '', '')"
+      >
+        <span>ESP32</span>
+        <small>3.3V</small>
       </button>
-      <button type="button" class="side-quick" onclick="applyQuick('LM2596', 'DIP', '', '3A', '')">
-        <span>LM2596</span><small>3A</small>
+
+      <button
+        type="button"
+        class="side-quick"
+        onclick="applyQuick('LM2596', 'DIP', '', '3A', '')"
+      >
+        <span>LM2596</span>
+        <small>3A</small>
       </button>
-      <button type="button" class="side-quick" onclick="applyQuick('Resistor', 'SMD', '', '', '0805')">
-        <span>Resistor</span><small>0805</small>
+
+      <button
+        type="button"
+        class="side-quick"
+        onclick="applyQuick('Resistor', 'SMD', '', '', '0805')"
+      >
+        <span>Resistor</span>
+        <small>0805</small>
       </button>
+
     </div>
 
     <div class="sidebar-footer">
       <span class="live-indicator"></span>
       Live distributor search
     </div>
+
   </aside>
 
+
   <main class="main-area">
+
     <header class="topbar">
+
       <div>
         <div class="eyebrow">COMPONENT INTELLIGENCE</div>
+
         <h1>Find the right part.</h1>
-        <p>Search distributor inventory with part names, electrical ratings, packages, and specifications.</p>
+
+        <p>
+          Search distributor inventory with part names, electrical ratings,
+          packages, and specifications.
+        </p>
       </div>
-      <div class="system-chip"><span></span> LIVE SEARCH</div>
+
+      <div class="system-chip">
+        <span></span> LIVE SEARCH
+      </div>
+
     </header>
 
-    <form class="search-workspace" id="searchForm" onsubmit="event.preventDefault(); startSearch();">
+
+    <form
+      class="search-workspace"
+      id="searchForm"
+      onsubmit="event.preventDefault(); startSearch();"
+    >
+
       <div class="search-head">
-        <div class="search-number">01</div>
+
+        <div class="search-number">
+          01
+        </div>
+
         <div>
-          <div class="section-title">Build your search</div>
-          <div class="section-caption">Enter a part or combine it with technical constraints.</div>
-        </div>
-      </div>
+          <div class="section-title">
+            Build your search
+          </div>
 
-      <div class="primary-search">
-        <div class="search-symbol">⌕</div>
-        <input type="text" id="queryInput" class="main-query-input" placeholder="ESP32, LM2596, Capacitor..." required oninput="updateQueryPreview()">
-        <button type="submit" class="search-btn" id="searchBtn">Search Parts <span>→</span></button>
-      </div>
-
-      <div class="filter-heading">PARAMETERS</div>
-      <div class="filter-grid">
-        <div class="filter-card">
-          <label for="specMount">Mount Type</label>
-          <select id="specMount" class="control-input" onchange="updateQueryPreview()">
-            <option value="">Any Mount</option>
-            <option value="SMD">SMD / SMT</option>
-            <option value="DIP">Through Hole (DIP)</option>
-          </select>
-        </div>
-
-        <div class="filter-card">
-          <label for="specVoltage">Voltage</label>
-          <select id="specVoltage" class="control-input" onchange="updateQueryPreview()">
-            <option value="">Any Voltage</option>
-            <option value="3.3V">3.3V</option>
-            <option value="5V">5V</option>
-            <option value="12V">12V</option>
-            <option value="24V">24V</option>
-          </select>
-        </div>
-
-        <div class="filter-card">
-          <label for="specCurrent">Current Rating</label>
-          <input type="text" id="specCurrent" class="control-input" placeholder="1A, 500mA" oninput="updateQueryPreview()">
-        </div>
-
-        <div class="filter-card">
-          <label for="specPackage">Package / Footprint</label>
-          <input type="text" id="specPackage" class="control-input" placeholder="SOP-8, TO-220, 0805" oninput="updateQueryPreview()">
-        </div>
-
-        <div class="filter-card">
-          <label for="specOther">Other Spec</label>
-          <input type="text" id="specOther" class="control-input" placeholder="16MB, Adjustable" oninput="updateQueryPreview()">
-        </div>
-      </div>
-
-      <div class="query-preview" id="queryPreview">
-        <span class="preview-label">QUERY</span>
-        <strong id="previewText">—</strong>
-      </div>
-    </form>
-
-    <div class="quick-strip">
-      <span class="quick-label">Try a quick search</span>
-      <div class="quick-parts">
-        <button type="button" class="quick-part" onclick="applyQuick('ESP32', '', '3.3V', '', '')">ESP32 <b>3.3V</b></button>
-        <button type="button" class="quick-part" onclick="applyQuick('LM2596', 'DIP', '', '3A', '')">LM2596 <b>3A</b></button>
-        <button type="button" class="quick-part" onclick="applyQuick('Resistor', 'SMD', '', '', '0805')">Resistor <b>0805</b></button>
-      </div>
-    </div>
-
-    <section id="statusPanel" class="status-panel">
-      <div class="status-header">
-        <div class="status-header-left">
-          <span class="status-spinner pulsing" id="statusSpinner"></span>
-          <div>
-            <div class="status-kicker">DISTRIBUTOR NETWORK</div>
-            <span id="statusHeadline">Searching Indian distributors...</span>
+          <div class="section-caption">
+            Enter a part or combine it with technical constraints.
           </div>
         </div>
-        <span id="statusCount" class="status-count"></span>
+
       </div>
-      <div id="statusGrid" class="status-grid"></div>
+
+
+      <div class="primary-search">
+
+        <div class="search-symbol">
+          ⌕
+        </div>
+
+        <input
+          type="text"
+          id="queryInput"
+          class="main-query-input"
+          placeholder="ESP32, LM2596, Capacitor..."
+          required
+          oninput="updateQueryPreview()"
+        >
+
+        <button
+          type="submit"
+          class="search-btn"
+          id="searchBtn"
+        >
+          Search Parts
+          <span>→</span>
+        </button>
+
+      </div>
+
+
+      <div class="filter-heading">
+        PARAMETERS
+      </div>
+
+
+      <div class="filter-grid">
+
+        <div class="filter-card">
+
+          <label for="specMount">
+            Mount Type
+          </label>
+
+          <select
+            id="specMount"
+            class="control-input"
+            onchange="updateQueryPreview()"
+          >
+            <option value="">
+              Any Mount
+            </option>
+
+            <option value="SMD">
+              SMD / SMT
+            </option>
+
+            <option value="DIP">
+              Through Hole (DIP)
+            </option>
+          </select>
+
+        </div>
+
+
+        <div class="filter-card">
+
+          <label for="specVoltage">
+            Voltage
+          </label>
+
+          <select
+            id="specVoltage"
+            class="control-input"
+            onchange="updateQueryPreview()"
+          >
+            <option value="">
+              Any Voltage
+            </option>
+
+            <option value="3.3V">
+              3.3V
+            </option>
+
+            <option value="5V">
+              5V
+            </option>
+
+            <option value="12V">
+              12V
+            </option>
+
+            <option value="24V">
+              24V
+            </option>
+          </select>
+
+        </div>
+
+
+        <div class="filter-card">
+
+          <label for="specCurrent">
+            Current Rating
+          </label>
+
+          <input
+            type="text"
+            id="specCurrent"
+            class="control-input"
+            placeholder="1A, 500mA"
+            oninput="updateQueryPreview()"
+          >
+
+        </div>
+
+
+        <div class="filter-card">
+
+          <label for="specPackage">
+            Package / Footprint
+          </label>
+
+          <input
+            type="text"
+            id="specPackage"
+            class="control-input"
+            placeholder="SOP-8, TO-220, 0805"
+            oninput="updateQueryPreview()"
+          >
+
+        </div>
+
+
+        <div class="filter-card">
+
+          <label for="specOther">
+            Other Spec
+          </label>
+
+          <input
+            type="text"
+            id="specOther"
+            class="control-input"
+            placeholder="16MB, Adjustable"
+            oninput="updateQueryPreview()"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div
+        class="query-preview"
+        id="queryPreview"
+      >
+
+        <span class="preview-label">
+          QUERY
+        </span>
+
+        <strong id="previewText">
+          —
+        </strong>
+
+      </div>
+
+    </form>
+
+
+    <div class="quick-strip">
+
+      <span class="quick-label">
+        Try a quick search
+      </span>
+
+      <div class="quick-parts">
+
+        <button
+          type="button"
+          class="quick-part"
+          onclick="applyQuick('ESP32', '', '3.3V', '', '')"
+        >
+          ESP32 <b>3.3V</b>
+        </button>
+
+        <button
+          type="button"
+          class="quick-part"
+          onclick="applyQuick('LM2596', 'DIP', '', '3A', '')"
+        >
+          LM2596 <b>3A</b>
+        </button>
+
+        <button
+          type="button"
+          class="quick-part"
+          onclick="applyQuick('Resistor', 'SMD', '', '', '0805')"
+        >
+          Resistor <b>0805</b>
+        </button>
+
+      </div>
+
+    </div>
+
+
+    <section
+      id="statusPanel"
+      class="status-panel"
+    >
+
+      <div class="status-header">
+
+        <div class="status-header-left">
+
+          <span
+            class="status-spinner pulsing"
+            id="statusSpinner"
+          ></span>
+
+          <div>
+
+            <div class="status-kicker">
+              DISTRIBUTOR NETWORK
+            </div>
+
+            <span id="statusHeadline">
+              Searching Indian distributors...
+            </span>
+
+          </div>
+
+        </div>
+
+        <span
+          id="statusCount"
+          class="status-count"
+        ></span>
+
+      </div>
+
+      <div
+        id="statusGrid"
+        class="status-grid"
+      ></div>
+
     </section>
+
 
     <section class="results-section">
-      <div id="controlsBar" class="controls-bar">
+
+      <div
+        id="controlsBar"
+        class="controls-bar"
+      >
+
         <div>
-          <div class="results-kicker">SEARCH RESULTS</div>
+
+          <div class="results-kicker">
+            SEARCH RESULTS
+          </div>
+
           <div id="resultsCount"></div>
+
         </div>
+
       </div>
-      <div id="results" class="results-grid"></div>
+
+      <div
+        id="results"
+        class="results-grid"
+      ></div>
+
     </section>
+
   </main>
+
 </div>
+
+
 <script>
+
 let evtSource = null;
+
 let allProducts = [];
+
 let totalSites = 0;
+
 let sitesChecked = 0;
 
-function makeId(name) { return 'site-' + name.replace(/[^a-zA-Z0-9]/g, ''); }
+
+// ============================================================
+//                    SITE ID
+// ============================================================
+
+function makeId(name) {
+
+  return 'site-' +
+    name.replace(
+      /[^a-zA-Z0-9]/g,
+      ''
+    );
+}
+
+
+// ============================================================
+//                    BUILD SEARCH QUERY
+// ============================================================
 
 function buildFullSearchQuery() {
-  const main = document.getElementById('queryInput').value.trim();
-  const mount = document.getElementById('specMount').value;
-  const voltage = document.getElementById('specVoltage').value;
-  const current = document.getElementById('specCurrent').value.trim();
-  const pkg = document.getElementById('specPackage').value.trim();
-  const other = document.getElementById('specOther').value.trim();
+
+  const main =
+    document.getElementById(
+      'queryInput'
+    ).value.trim();
+
+  const mount =
+    document.getElementById(
+      'specMount'
+    ).value;
+
+  const voltage =
+    document.getElementById(
+      'specVoltage'
+    ).value;
+
+  const current =
+    document.getElementById(
+      'specCurrent'
+    ).value.trim();
+
+  const pkg =
+    document.getElementById(
+      'specPackage'
+    ).value.trim();
+
+  const other =
+    document.getElementById(
+      'specOther'
+    ).value.trim();
+
 
   // Combine query terms
-  const terms = [main, mount, voltage, current, pkg, other].filter(Boolean);
+
+  const terms = [
+    main,
+    mount,
+    voltage,
+    current,
+    pkg,
+    other
+  ].filter(Boolean);
+
+
   return terms.join(' ');
 }
 
+
+// ============================================================
+//                    QUERY PREVIEW
+// ============================================================
+
 function updateQueryPreview() {
-  const query = buildFullSearchQuery();
-  document.getElementById('previewText').textContent = query || '—';
+
+  const query =
+    buildFullSearchQuery();
+
+  document.getElementById(
+    'previewText'
+  ).textContent =
+    query || '—';
 }
 
-function applyQuick(name, mount, v, c, pkg) {
-  document.getElementById('queryInput').value = name;
-  document.getElementById('specMount').value = mount;
-  document.getElementById('specVoltage').value = v;
-  document.getElementById('specCurrent').value = c;
-  document.getElementById('specPackage').value = pkg;
+
+// ============================================================
+//                    QUICK SEARCH
+// ============================================================
+
+function applyQuick(
+  name,
+  mount,
+  v,
+  c,
+  pkg
+) {
+
+  document.getElementById(
+    'queryInput'
+  ).value = name;
+
+  document.getElementById(
+    'specMount'
+  ).value = mount;
+
+  document.getElementById(
+    'specVoltage'
+  ).value = v;
+
+  document.getElementById(
+    'specCurrent'
+  ).value = c;
+
+  document.getElementById(
+    'specPackage'
+  ).value = pkg;
+
   updateQueryPreview();
+
   startSearch();
 }
 
+
+// ============================================================
+//                    START SEARCH
+// ============================================================
+
 function startSearch() {
-  const fullQuery = buildFullSearchQuery();
+
+  const fullQuery =
+    buildFullSearchQuery();
+
   if (!fullQuery) return;
 
-  const resultsDiv = document.getElementById('results');
-  const statusPanel = document.getElementById('statusPanel');
-  const statusGrid = document.getElementById('statusGrid');
-  const controlsBar = document.getElementById('controlsBar');
+
+  const resultsDiv =
+    document.getElementById(
+      'results'
+    );
+
+  const statusPanel =
+    document.getElementById(
+      'statusPanel'
+    );
+
+  const statusGrid =
+    document.getElementById(
+      'statusGrid'
+    );
+
+  const controlsBar =
+    document.getElementById(
+      'controlsBar'
+    );
+
 
   allProducts = [];
+
   totalSites = 0;
+
   sitesChecked = 0;
+
+
   resultsDiv.innerHTML = '';
+
   statusGrid.innerHTML = '';
-  statusPanel.style.display = 'block';
-  controlsBar.style.display = 'none';
 
-  document.getElementById('searchBtn').disabled = true;
-  document.getElementById('statusSpinner').className = 'status-spinner pulsing';
-  document.getElementById('statusHeadline').textContent = `Querying distributors for "${fullQuery}"`;
+  statusPanel.style.display =
+    'block';
 
-  if (evtSource) evtSource.close();
+  controlsBar.style.display =
+    'none';
 
-  // Send the query with parameters included
-const backendUrl = `https://component-finder.onrender.com/api/search?q=${encodeURIComponent(fullQuery)}`;
-evtSource = new EventSource(backendUrl);
 
-  evtSource.onmessage = function(event) {
-    const data = JSON.parse(event.data);
+  document.getElementById(
+    'searchBtn'
+  ).disabled = true;
 
-    if (data.type === 'init') {
-      totalSites = data.sites.length;
-      data.sites.forEach(siteName => {
-        const row = document.createElement('div');
-        row.className = 'site-row';
-        row.id = makeId(siteName);
-        row.innerHTML = `<span class="site-name"><span class="site-dot"></span>${siteName}</span><span class="site-status">Waiting</span>`;
-        statusGrid.appendChild(row);
-      });
-    }
-    else if (data.type === 'status') {
-      const row = document.getElementById(makeId(data.site));
-      if (row) {
-        const dot = row.querySelector('.site-dot');
-        const status = row.querySelector('.site-status');
-        if (data.state === 'searching') {
-          dot.className = 'site-dot searching';
-          status.textContent = 'Searching...';
-        } else if (data.state === 'done') {
-          sitesChecked++;
-          dot.className = data.count > 0 ? 'site-dot available' : 'site-dot unavailable';
-          status.textContent = data.count > 0 ? `${data.count} found` : 'None found';
-        }
-      }
-    }
-    else if (data.type === 'result') {
-      if (data.products) {
-        data.products.forEach(p => allProducts.push({ ...p, site: data.site }));
-        renderProducts();
-      }
-    }
-    else if (data.type === 'done') {
-      document.getElementById('searchBtn').disabled = false;
-      document.getElementById('statusSpinner').className = 'status-spinner done';
-      document.getElementById('statusHeadline').textContent = 'Completed Search';
-      evtSource.close();
-    }
-  };
 
-  evtSource.onerror = function() {
-    document.getElementById('searchBtn').disabled = false;
+  document.getElementById(
+    'statusSpinner'
+  ).className =
+    'status-spinner pulsing';
+
+
+  document.getElementById(
+    'statusHeadline'
+  ).textContent =
+    `Querying distributors for "${fullQuery}"`;
+
+
+  if (evtSource) {
     evtSource.close();
-  };
+  }
+
+
+  // ========================================================
+  //                    RENDER BACKEND URL
+  // ========================================================
+
+  const backendUrl =
+    `https://component-finder.onrender.com/api/search?q=${encodeURIComponent(fullQuery)}`;
+
+
+  evtSource =
+    new EventSource(
+      backendUrl
+    );
+
+
+  // ========================================================
+  //                    SSE MESSAGE
+  // ========================================================
+
+  evtSource.onmessage =
+    function(event) {
+
+      const data =
+        JSON.parse(
+          event.data
+        );
+
+
+      // ====================================================
+      //                    INIT
+      // ====================================================
+
+      if (
+        data.type === 'init'
+      ) {
+
+        totalSites =
+          data.sites.length;
+
+
+        data.sites.forEach(
+          siteName => {
+
+            const row =
+              document.createElement(
+                'div'
+              );
+
+            row.className =
+              'site-row';
+
+            row.id =
+              makeId(
+                siteName
+              );
+
+
+            row.innerHTML = `
+              <span class="site-name">
+                <span class="site-dot"></span>
+                ${siteName}
+              </span>
+
+              <span class="site-status">
+                Waiting
+              </span>
+            `;
+
+
+            statusGrid.appendChild(
+              row
+            );
+
+          }
+        );
+
+      }
+
+
+      // ====================================================
+      //                    STATUS
+      // ====================================================
+
+      else if (
+        data.type === 'status'
+      ) {
+
+        const row =
+          document.getElementById(
+            makeId(data.site)
+          );
+
+
+        if (row) {
+
+          const dot =
+            row.querySelector(
+              '.site-dot'
+            );
+
+          const status =
+            row.querySelector(
+              '.site-status'
+            );
+
+
+          // -----------------------------------------------
+          // SEARCHING
+          // -----------------------------------------------
+
+          if (
+            data.state ===
+            'searching'
+          ) {
+
+            dot.className =
+              'site-dot searching';
+
+            status.textContent =
+              'Searching...';
+
+          }
+
+
+          // -----------------------------------------------
+          // DONE
+          // -----------------------------------------------
+
+          else if (
+            data.state ===
+            'done'
+          ) {
+
+            sitesChecked++;
+
+
+            dot.className =
+              data.count > 0
+                ? 'site-dot available'
+                : 'site-dot unavailable';
+
+
+            status.textContent =
+              data.count > 0
+                ? `${data.count} found`
+                : 'None found';
+
+          }
+
+
+          // -----------------------------------------------
+          // ERROR
+          // -----------------------------------------------
+
+          else if (
+            data.state ===
+            'error'
+          ) {
+
+            sitesChecked++;
+
+
+            dot.className =
+              'site-dot unavailable';
+
+
+            status.textContent =
+              'Search failed';
+
+          }
+
+        }
+
+      }
+
+
+      // ====================================================
+      //                    RESULTS
+      // ====================================================
+
+      else if (
+        data.type === 'result'
+      ) {
+
+        if (data.products) {
+
+          data.products.forEach(
+            p => {
+
+              allProducts.push({
+                ...p,
+                site:
+                  data.site
+              });
+
+            }
+          );
+
+
+          renderProducts();
+
+        }
+
+      }
+
+
+      // ====================================================
+      //                    COMPLETE
+      // ====================================================
+
+      else if (
+        data.type === 'done'
+      ) {
+
+        document.getElementById(
+          'searchBtn'
+        ).disabled = false;
+
+
+        document.getElementById(
+          'statusSpinner'
+        ).className =
+          'status-spinner done';
+
+
+        document.getElementById(
+          'statusHeadline'
+        ).textContent =
+          'Completed Search';
+
+
+        evtSource.close();
+
+      }
+
+    };
+
+
+  // ========================================================
+  //                    CONNECTION ERROR
+  // ========================================================
+
+  evtSource.onerror =
+    function() {
+
+      document.getElementById(
+        'searchBtn'
+      ).disabled = false;
+
+
+      document.getElementById(
+        'statusSpinner'
+      ).className =
+        'status-spinner';
+
+
+      document.getElementById(
+        'statusHeadline'
+      ).textContent =
+        'Unable to connect to the Render backend';
+
+
+      evtSource.close();
+
+    };
+
 }
+
+
+// ============================================================
+//                    RENDER PRODUCTS
+// ============================================================
 
 function renderProducts() {
-  const resultsDiv = document.getElementById('results');
-  document.getElementById('controlsBar').style.display = 'flex';
-  document.getElementById('resultsCount').innerHTML = `Found <strong>${allProducts.length}</strong> matching specifications`;
+
+  const resultsDiv =
+    document.getElementById(
+      'results'
+    );
+
+
+  document.getElementById(
+    'controlsBar'
+  ).style.display =
+    'flex';
+
+
+  document.getElementById(
+    'resultsCount'
+  ).innerHTML =
+    `Found <strong>${allProducts.length}</strong> matching specifications`;
+
 
   resultsDiv.innerHTML = '';
-  allProducts.forEach(product => {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-    card.innerHTML = `
-      <div class="product-title">${product.title}</div>
-      <div class="product-meta">
-        <div class="product-price">${product.price}</div>
-        <div style="font-size:10px; color:var(--text-dim);">${product.site}</div>
-        <a href="${product.link}" target="_blank" rel="noopener" class="product-link">View Listing</a>
-      </div>
-    `;
-    resultsDiv.appendChild(card);
-  });
+
+
+  allProducts.forEach(
+    product => {
+
+      const card =
+        document.createElement(
+          'div'
+        );
+
+
+      card.className =
+        'product-card';
+
+
+      card.innerHTML = `
+        <div class="product-title">
+          ${product.title}
+        </div>
+
+        <div class="product-meta">
+
+          <div class="product-price">
+            ${product.price}
+          </div>
+
+          <div style="font-size:10px; color:var(--text-dim);">
+            ${product.site}
+          </div>
+
+          <div style="font-size:10px; color:var(--text-dim); margin-top:3px;">
+            ${product.availability || 'Availability Unknown'}
+          </div>
+
+          <a
+            href="${product.link}"
+            target="_blank"
+            rel="noopener"
+            class="product-link"
+          >
+            View Listing
+          </a>
+
+        </div>
+      `;
+
+
+      resultsDiv.appendChild(
+        card
+      );
+
+    }
+  );
+
 }
+
 </script>
+
 </body>
 </html>
