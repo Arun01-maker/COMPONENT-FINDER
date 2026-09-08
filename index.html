@@ -10,90 +10,73 @@
     <div class="max-w-4xl mx-auto">
         <h1 class="text-3xl font-bold mb-6">Component Finder</h1>
         
-        <!-- Search Input -->
         <div class="flex gap-4 mb-8">
             <input id="searchInput" type="text" value="LM7805" placeholder="Enter part name..." 
                    class="flex-1 p-3 rounded bg-slate-800 text-white border border-slate-700 focus:outline-none focus:border-blue-500">
-            <button onclick="startSearch()" class="bg-blue-600 px-6 py-3 rounded font-bold hover:bg-blue-500">
+            <button id="searchBtn" onclick="startSearch()" class="bg-blue-600 px-6 py-3 rounded font-bold hover:bg-blue-500">
                 Search Parts →
             </button>
         </div>
 
-        <!-- Status Box -->
         <div id="statusBox" class="p-4 mb-6 rounded bg-slate-800 border border-slate-700 text-yellow-400 hidden">
-            <span id="statusText">Ready</span>
+            <span id="statusText">Querying distributors...</span>
         </div>
 
-        <!-- Results Container -->
         <div id="resultsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     </div>
 
     <script>
-        let eventSource = null;
-
-        function startSearch() {
+        async function startSearch() {
             const query = document.getElementById('searchInput').value.trim();
             if (!query) return;
 
             const statusBox = document.getElementById('statusBox');
             const statusText = document.getElementById('statusText');
             const container = document.getElementById('resultsContainer');
+            const searchBtn = document.getElementById('searchBtn');
 
-            // Reset view
             container.innerHTML = '';
-            statusBox.classList.remove('hidden');
+            statusBox.classList.remove('hidden', 'text-red-400', 'text-green-400');
+            statusBox.classList.add('text-yellow-400');
             statusText.textContent = `Querying distributors for "${query}"...`;
+            searchBtn.disabled = true;
 
-            if (eventSource) {
-                eventSource.close();
-            }
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                if (!response.ok) throw new Error("Search failed");
 
-            // Connect to dynamic backend SSE endpoint
-            eventSource = new EventSource(`/api/search?q=${encodeURIComponent(query)}`);
-
-            eventSource.onmessage = function(event) {
-                const response = JSON.parse(event.data);
-
-                if (response.type === 'status') {
-                    statusText.textContent = response.message;
-                } 
-                else if (response.type === 'results') {
-                    renderResults(response.data);
-                } 
-                else if (response.type === 'done') {
-                    statusText.textContent = "Search complete!";
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    statusText.textContent = `Found ${data.results.length} result(s)!`;
                     statusBox.classList.remove('text-yellow-400');
                     statusBox.classList.add('text-green-400');
-                    eventSource.close();
+                    renderResults(data.results);
+                } else {
+                    statusText.textContent = "No products found for this query.";
                 }
-            };
-
-            eventSource.onerror = function(err) {
-                console.error("EventSource failed:", err);
+            } catch (err) {
+                console.error(err);
                 statusText.textContent = "Error fetching search results. Please try again.";
+                statusBox.classList.remove('text-yellow-400');
                 statusBox.classList.add('text-red-400');
-                eventSource.close();
-            };
+            } finally {
+                searchBtn.disabled = false;
+            }
         }
 
         function renderResults(products) {
             const container = document.getElementById('resultsContainer');
-            
-            if (!products || products.length === 0) {
-                container.innerHTML = `<div class="col-span-2 text-slate-400">No components found.</div>`;
-                return;
-            }
-
             container.innerHTML = products.map(item => `
                 <div class="bg-slate-800 p-4 rounded border border-slate-700 flex flex-col justify-between">
                     <div>
                         <span class="text-xs font-bold px-2 py-1 rounded bg-blue-900 text-blue-300 mb-2 inline-block">
                             ${item.distributor}
                         </span>
-                        <h3 class="font-semibold text-lg line-clamp-2">${item.title}</h3>
+                        <h3 class="font-semibold text-lg">${item.title}</h3>
                         <p class="text-xl font-bold text-green-400 mt-2">${item.price}</p>
                     </div>
-                    <a href="${item.link}" target="_blank" class="mt-4 text-center bg-slate-700 hover:bg-slate-600 py-2 rounded text-sm font-semibold">
+                    <a href="${item.link}" target="_blank" class="mt-4 text-center bg-blue-600 hover:bg-blue-500 py-2 rounded text-sm font-semibold text-white">
                         View Product →
                     </a>
                 </div>
