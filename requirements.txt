@@ -1,5 +1,5 @@
-flask
-flask-cors
-requests
+fastapi
+uvicorn[standard]
+httpx
 beautifulsoup4
-gunicorn
+camufox
