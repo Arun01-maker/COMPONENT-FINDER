@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies, including libgtk-3-0 and Playwright dependencies
+# Install system dependencies required for headless Firefox & Camoufox (GTK, X11, Display drivers)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget curl gnupg \
     libgtk-3-0 libglib2.0-0 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
@@ -11,17 +11,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements and install
+# Copy requirements and install Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright system dependencies & fetch Camoufox browser binaries
+# Download Camoufox browser binaries and dependencies
 RUN python -m playwright install-deps firefox || true
 RUN python -m camoufox fetch
 
+# Copy the rest of the application code
 COPY . .
 
+# Expose default port
 EXPOSE 10000
 
-# Start Uvicorn pointing to app.py
+# Start Uvicorn pointing to app:app and reading Render's PORT variable
 CMD ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000}"]
