@@ -26,12 +26,12 @@ app.add_middleware(
 # Fast HTTP is tried first. Camoufox is started in parallel so it is ready when
 # a distributor needs JavaScript/browser rendering.
 HTTP_TIMEOUT = 4.5
-SITE_TIMEOUT = 18.0
-PRODUCT_TIMEOUT = 5.5
-CAMOUFOX_START_TIMEOUT = 14.0
-CAMOUFOX_PAGE_TIMEOUT = 9000
+SITE_TIMEOUT = 16.0
+PRODUCT_TIMEOUT = 4.5
+CAMOUFOX_START_TIMEOUT = 10.0
+CAMOUFOX_PAGE_TIMEOUT = 7000
 MAX_LISTING_RESULTS = 6
-MAX_VERIFY_RESULTS = 6
+MAX_VERIFY_RESULTS = 3
 MAX_CONCURRENT_SITES = 12
 # Lower numbers are launched first. All sites still run concurrently once their
 # priority batch starts, so fast structured endpoints can return immediately.
@@ -56,7 +56,7 @@ SITES = [
     {"id": "08", "name": "MakerBazar", "kind": "shopify", "search": "https://makerbazar.in/search?q={q}", "origin": "https://makerbazar.in"},
     {"id": "09", "name": "Probots", "kind": "woocommerce", "search": "https://probots.co.in/?s={q}&post_type=product", "origin": "https://probots.co.in"},
     {"id": "10", "name": "Sharvi Electronics", "kind": "woocommerce", "search": "https://sharvielectronics.com/?s={q}&post_type=product", "origin": "https://sharvielectronics.com"},
-    {"id": "11", "name": "Leeds Electronics Industry", "kind": "generic", "search": "https://www.leedsind.net/?s={q}", "origin": "https://www.leedsind.net"},
+    {"id": "11", "name": "Leeds Electronic Industry Inc", "kind": "generic", "search": "https://www.leedsind.net/?s={q}", "origin": "https://www.leedsind.net"},
     {"id": "12", "name": "Sparefly", "kind": "shopify", "search": "https://sparefly.com/search?q={q}", "origin": "https://sparefly.com"},
 ]
 SITE_BY_ID = {s["id"]: s for s in SITES}
@@ -352,6 +352,7 @@ class Browser:
         self.cm = None
         self.browser = None
         self.lock = asyncio.Lock()
+        self.page_sem = asyncio.Semaphore(3)
 
     async def start(self):
         if self.browser is not None or AsyncCamoufox is None:
@@ -369,6 +370,10 @@ class Browser:
         return self.browser
 
     async def fetch(self, url):
+        async with self.page_sem:
+            return await self._fetch_one(url)
+
+    async def _fetch_one(self, url):
         browser = await self.start()
         if browser is None:
             return None
@@ -431,6 +436,52 @@ async def shopify_search(client, site, query):
         return sorted(out, key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
     except Exception as exc:
         print(f"Shopify search failed {site['name']}: {exc}")
+        return []
+
+
+async def woocommerce_search(client, site, query):
+    """Fast native WooCommerce product search for WordPress distributors."""
+    url = site["origin"].rstrip("/") + "/wp-json/wc/store/v1/products"
+    try:
+        r = await client.get(url, params={
+            "search": query,
+            "per_page": MAX_LISTING_RESULTS,
+            "catalog_visibility": "visible",
+        }, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, list):
+            return []
+        out = []
+        for item in data:
+            title = clean_text(item.get("name"))
+            link = item.get("permalink") or ""
+            if not title or not link or not component_match(title, query):
+                continue
+            prices = item.get("prices") or {}
+            price_raw = prices.get("price_html") or prices.get("price") or ""
+            price = clean_text(BeautifulSoup(str(price_raw), "html.parser").get_text(" ", strip=True)) or "N/A"
+            if item.get("is_in_stock") is True:
+                state = "IN_STOCK"
+            elif item.get("is_in_stock") is False:
+                state = "OUT_OF_STOCK"
+            elif item.get("is_on_backorder"):
+                state = "AVAILABLE_TO_ORDER"
+            else:
+                state = "UNKNOWN"
+            qty = None
+            stock = item.get("stock_availability") or {}
+            if state == "UNKNOWN":
+                state, qty = parse_availability(clean_text(stock.get("text")))
+            out.append({
+                "title": title, "link": link, "price": price,
+                "availability_state": state, "stock_quantity": qty,
+                "availability": availability_label(state, qty),
+                "_score": title_score(title, query),
+            })
+        return sorted(out, key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
+    except Exception as exc:
+        print(f"WooCommerce search failed {site['name']}: {exc}")
         return []
 
 
@@ -512,43 +563,81 @@ async def verify_product(client, browser, product, site):
 
 
 async def verify_products(client, browser, products, site):
-    # Verify all candidates concurrently. Product-page verification is the source
-    # of truth; a search-result badge is never enough.
-    await asyncio.gather(*(verify_product(client, browser, p, site) for p in products[:MAX_VERIFY_RESULTS]))
-    return [p for p in products if p.get("verified")]
+    # Verify a small number of best candidates. Product-page verification is the
+    # source of truth; a search-result badge is never enough.
+    candidates = products[:MAX_VERIFY_RESULTS]
+    results = await asyncio.gather(
+        *(verify_product(client, browser, p, site) for p in candidates),
+        return_exceptions=True,
+    )
+    return [p for p, ok in zip(candidates, results) if ok is True and p.get("verified")]
 
 
 async def search_site(client, browser, site, query):
-    # 1. Use structured distributor endpoints where available.
-    products = []
-    if site["kind"] == "robu":
-        products = await robu_search(client, query)
-    elif site["kind"] == "shopify":
-        products = await shopify_search(client, site, query)
+    """Search the actual distributor first, then verify product pages.
 
-    # 2. Direct website search. If the fast HTML result has no match, browser
-    # rendering performs the same search URL inside the actual website.
+    Return a precise result state so the UI can distinguish:
+    - found: matching product + verified availability
+    - not_found: site was reachable but no matching product was found
+    - unverified: product was found but stock could not be proven
+    - unavailable: the distributor could not be reached
+    """
+    products = []
+    successful_search = False
+    last_error = None
+
+    try:
+        if site["kind"] == "robu":
+            products = await robu_search(client, query)
+            successful_search = True
+        elif site["kind"] == "shopify":
+            products = await shopify_search(client, site, query)
+            successful_search = True
+        elif site["kind"] == "woocommerce":
+            products = await woocommerce_search(client, site, query)
+            successful_search = True
+    except Exception as exc:
+        last_error = str(exc)
+
+    # Native website search. Keep this HTTP-first because it is much faster than
+    # opening a browser. Try several native search forms for WordPress/OpenCart/
+    # Magento-style stores.
     if not products:
         for url in site_search_urls(site, query):
             html = await fetch_http(client, url)
-            if html:
-                products = extract_candidates(html, site, query)
-            if products:
+            if html is None:
+                continue
+            successful_search = True
+            found = extract_candidates(html, site, query)
+            if found:
+                products = found
                 break
 
+    # Browser fallback is used only when the real website search did not expose
+    # its results to HTTP. Limit browser pages so one JS-heavy site cannot block
+    # the whole search.
     if not products:
-        for url in site_search_urls(site, query)[:3]:
-            html = await browser.fetch(url)
-            if html:
-                products = extract_candidates(html, site, query)
-            if products:
-                break
+        browser = browser
+        browser_ok = await browser.start()
+        if browser_ok is not None:
+            for url in site_search_urls(site, query)[:2]:
+                html = await browser.fetch(url)
+                if html:
+                    successful_search = True
+                    found = extract_candidates(html, site, query)
+                    if found:
+                        products = found
+                        break
 
     if not products:
-        return [], "not_found"
+        if successful_search:
+            return [], "not_found"
+        return [], "unavailable"
 
     verified = await verify_products(client, browser, products, site)
-    return verified, "found" if verified else "found_unverified"
+    if verified:
+        return verified, "found"
+    return [], "unverified"
 
 
 def sse(data):
@@ -617,8 +706,9 @@ async def event_generator(query, selected_sites=None):
                     "checked": checked,
                     "total": total,
                     "count": len(products),
-                    "state": "done" if state in {"found", "not_found", "found_unverified"} else "failed",
+                    "state": "done" if state in {"found", "not_found", "unverified"} else "failed",
                     "result": state,
+                    "error": error if error and state == "error" else None,
                 })
 
             yield sse({"type": "done", "checked": checked, "total": total})
