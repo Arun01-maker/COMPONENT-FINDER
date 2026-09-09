@@ -28,16 +28,16 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 # Search is HTTP-first. Camoufox is started ONLY if a normal request fails.
 HTTP_TIMEOUT = 5.0
-SITE_TIMEOUT = 7.0
-PRODUCT_TIMEOUT = 4.5
+SITE_TIMEOUT = 15.0
+PRODUCT_TIMEOUT = 8.0
 CAMOUFOX_START_TIMEOUT = 12.0
 CAMOUFOX_PAGE_TIMEOUT = 8000
 MAX_LISTING_RESULTS = 5
-MAX_VERIFY_RESULTS = 5
+MAX_VERIFY_RESULTS = 8
 MAX_CONCURRENT_SITES = 10
 
 SITES = [
-    {"id": "01", "name": "ET Store", "kind": "generic", "search": "https://etstore.in/index.php?route=product/search&search={q}", "origin": "https://etstore.in"},
+    {"id": "01", "name": "ET Store", "kind": "shopify", "search": "https://www.etstore.in/search?q={q}", "origin": "https://www.etstore.in"},
     {"id": "02", "name": "Robu.in", "kind": "robu", "search": "https://robu.in/?s={q}&post_type=product", "origin": "https://robu.in"},
     {"id": "03", "name": "element14", "kind": "element14", "search": "https://in.element14.com/search?st={q}", "origin": "https://in.element14.com"},
     {"id": "04", "name": "ElectronicsComp", "kind": "generic", "search": "https://www.electronicscomp.com/index.php?route=product/search&search={q}", "origin": "https://www.electronicscomp.com"},
@@ -45,9 +45,9 @@ SITES = [
     {"id": "06", "name": "Tomson Electronics", "kind": "shopify", "search": "https://www.tomsonelectronics.com/search?q={q}", "origin": "https://www.tomsonelectronics.com"},
     {"id": "07", "name": "QuartzComponents", "kind": "shopify", "search": "https://quartzcomponents.com/search?q={q}", "origin": "https://quartzcomponents.com"},
     {"id": "08", "name": "MakerBazar", "kind": "shopify", "search": "https://makerbazar.in/search?q={q}", "origin": "https://makerbazar.in"},
-    {"id": "09", "name": "Probots", "kind": "shopify", "search": "https://probots.co.in/search?q={q}", "origin": "https://probots.co.in"},
-    {"id": "10", "name": "Sharvi Electronics", "kind": "shopify", "search": "https://sharvielectronics.com/search?q={q}", "origin": "https://sharvielectronics.com"},
-    {"id": "11", "name": "Leeds Electronics", "kind": "generic", "search": "https://www.leedsind.com/?s={q}", "origin": "https://www.leedsind.com"},
+    {"id": "09", "name": "Probots", "kind": "generic", "search": "https://probots.co.in/?s={q}", "origin": "https://probots.co.in"},
+    {"id": "10", "name": "Sharvi Electronics", "kind": "generic", "search": "https://sharvielectronics.com/?s={q}", "origin": "https://sharvielectronics.com"},
+    {"id": "11", "name": "Leeds Electronics Industry", "kind": "generic", "search": "https://www.leedsind.net/?s={q}", "origin": "https://www.leedsind.net"},
     {"id": "12", "name": "Sparefly", "kind": "shopify", "search": "https://sparefly.com/search?q={q}", "origin": "https://sparefly.com"},
 ]
 
@@ -563,10 +563,14 @@ async def search_robu_api(client, query):
 # -----------------------------------------------------------------------------
 # SEARCH ONE SITE
 # -----------------------------------------------------------------------------
-async def verify_unknown_products(client, browser_fallback, products):
-    # Verify every returned product page (up to MAX_VERIFY_RESULTS). This makes
-    # the product page, rather than the search result card, the final source of
-    # availability whenever the page exposes an explicit state.
+async def verify_products(client, browser_fallback, products):
+    """Verify matching products on their actual product pages.
+
+    Search-result availability is treated as provisional. The final state is
+    taken from the product page whenever the page exposes an explicit state.
+    Products for which the actual product page cannot be checked are omitted
+    rather than incorrectly reported as available.
+    """
     to_verify = products[:MAX_VERIFY_RESULTS]
     if not to_verify:
         return
@@ -586,6 +590,14 @@ async def verify_unknown_products(client, browser_fallback, products):
                 product["availability_state"] = state
                 product["stock_quantity"] = qty
                 product["availability"] = availability_label(state, qty)
+            else:
+                product["availability_state"] = "UNKNOWN"
+                product["stock_quantity"] = None
+                product["availability"] = "Unavailable"
+        else:
+            product["availability_state"] = "UNKNOWN"
+            product["stock_quantity"] = None
+            product["availability"] = "Unavailable"
 
     await asyncio.gather(*(verify(p) for p in to_verify))
 
@@ -608,26 +620,45 @@ async def search_site(client, browser_fallback, site, query):
     # Normal HTML search is the next path for non-Shopify sites, and a fallback
     # for Shopify stores whose JSON search endpoint did not return products.
     if not products:
-        search_url = site["search"].format(q=quote_plus(query))
-        html_text = await fetch_http(client, search_url)
+        search_urls = [site["search"].format(q=quote_plus(query))]
+        # Many WordPress/OpenCart distributors expose different search routes.
+        # Try the site's configured route first, then common internal-search routes
+        # before declaring the component absent.
+        if site["kind"] == "generic":
+            origin = site["origin"].rstrip("/")
+            for candidate in [
+                f"{origin}/?s={quote_plus(query)}",
+                f"{origin}/search?q={quote_plus(query)}",
+                f"{origin}/search/?q={quote_plus(query)}",
+                f"{origin}/index.php?route=product/search&search={quote_plus(query)}",
+            ]:
+                if candidate not in search_urls:
+                    search_urls.append(candidate)
 
-        # If HTTP returned a JS shell or an incomplete search page, retry the
-        # search itself in Camoufox. Previously this fallback happened only when
-        # HTTP failed, which caused many valid products to appear as "not found".
-        if html_text is not None:
-            products = extract_products(html_text, site, query)
+        for search_url in search_urls:
+            html_text = await fetch_http(client, search_url)
+            if html_text is not None:
+                products = extract_products(html_text, site, query)
+            if products:
+                break
+
+        # If HTTP returned a JS shell, bot challenge, or incomplete search page,
+        # retry the actual distributor search in Camoufox.
         if not products:
             browser = await browser_fallback.get()
-            html_text = await camoufox_fetch(browser, search_url)
-            if html_text:
-                products = extract_products(html_text, site, query)
+            for search_url in search_urls[:2]:
+                html_text = await camoufox_fetch(browser, search_url)
+                if html_text:
+                    products = extract_products(html_text, site, query)
+                if products:
+                    break
 
     if not products:
         return []
 
-    # Verify the actual product pages. A search-card badge is not treated as
-    # authoritative when the product page gives a different explicit state.
-    await verify_unknown_products(client, browser_fallback, products)
+    # Always verify the actual product pages. Search-card availability is never
+    # considered authoritative by itself.
+    await verify_products(client, browser_fallback, products)
 
     verified = [p for p in products if p["availability_state"] != "UNKNOWN"]
     for p in verified:
