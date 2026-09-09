@@ -49,6 +49,85 @@ SITES = [
     {"id": "11", "name": "Leeds Electronic Industry Inc", "kind": "generic", "search": "https://www.leedsind.net/?s={q}", "origin": "https://www.leedsind.net"},
     {"id": "12", "name": "Sparefly", "kind": "shopify", "search": "https://sparefly.com/search?q={q}", "origin": "https://sparefly.com"},
 ]
+
+# Site-specific selectors based on the supplied working search reference.
+# These are tried before the generic parser so each distributor's real product
+# card structure is used when it is known.
+SITE_RULES = {
+    "ET Store": {
+        "cards": [".product-item", ".grid__item"],
+        "title": [".product-item__title", ".card__heading"],
+        "price": [".price", ".price-item"],
+        "link": ["a"],
+    },
+    "Robu.in": {
+        "cards": ["li.product", ".product-small", ".product"],
+        "title": [".woocommerce-loop-product__title", ".product-title"],
+        "price": ["span.price", ".amount"],
+        "link": ["a.woocommerce-LoopProduct-link", "a"],
+    },
+    "Sharvi Electronics": {
+        "cards": ["li.product", "div.product-small", ".product"],
+        "title": [".woocommerce-loop-product__title", ".product-title"],
+        "price": ["span.price", ".price"],
+        "link": ["a"],
+    },
+    "element14 India": {
+        "cards": ["tr.productRow", "div.productDisplay", ".productRow"],
+        "title": ["a.description", ".productDescription", "a"],
+        "price": [".price", ".discountPrice"],
+        "link": ["a.description", ".productDescription", "a"],
+    },
+    "Sparefly": {
+        "cards": [".product-item", ".grid__item"],
+        "title": [".product-item__title", ".card__heading"],
+        "price": [".price", ".price-item"],
+        "link": ["a"],
+    },
+    "Tomson Electronics": {
+        "cards": [".product-item", ".grid__item", ".card-wrapper"],
+        "title": [".product-item__title", ".card__heading", ".full-unstyled-link"],
+        "price": [".price", ".price-item"],
+        "link": ["a"],
+    },
+    "QuartzComponents": {
+        "cards": [".product-item", ".grid__item", ".card-wrapper"],
+        "title": [".product-item__title", ".card__heading", ".full-unstyled-link"],
+        "price": [".price", ".price-item"],
+        "link": ["a"],
+    },
+    "MakerBazar": {
+        "cards": [".product-item", ".grid__item", ".card-wrapper"],
+        "title": [".product-item__title", ".card__heading", ".full-unstyled-link"],
+        "price": [".price", ".price-item"],
+        "link": ["a"],
+    },
+    "Probots": {
+        "cards": ["li.product", ".product", ".product-small"],
+        "title": [".woocommerce-loop-product__title", ".product-title"],
+        "price": ["span.price", ".price"],
+        "link": ["a"],
+    },
+    "ElectronicsComp": {
+        "cards": [".product-layout", ".product-thumb", ".product-grid-item"],
+        "title": ["h4 a", ".caption a", ".product-name", ".product-title"],
+        "price": [".price", ".price-new", ".product-price"],
+        "link": ["h4 a", ".caption a", "a"],
+    },
+    "Evelta": {
+        "cards": [".product-item", ".product-item-info", ".product"],
+        "title": [".product-item-link", ".product-name", "a"],
+        "price": [".price", ".price-box", ".special-price"],
+        "link": [".product-item-link", "a"],
+    },
+    "Leeds Electronic Industry Inc": {
+        "cards": [".product-layout", ".product-thumb", ".product-item", "article"],
+        "title": ["h4 a", ".caption a", ".product-title", "h2 a", "h3 a"],
+        "price": [".price", ".price-new", ".product-price"],
+        "link": ["h4 a", ".caption a", "a"],
+    },
+}
+
 SITE_BY_ID = {s["id"]: s for s in SITES}
 SITE_BY_NAME = {s["name"].lower(): s for s in SITES}
 
@@ -289,7 +368,70 @@ def candidate_from_anchor(anchor, site, query, block=None):
     return {"title": title[:350], "link": link, "price": extract_price(block or parent), "_score": score}
 
 
+
+def _first_selected(block, selectors):
+    for selector in selectors:
+        node = block.select_one(selector)
+        if node:
+            return node
+    return None
+
+
+def extract_site_specific_candidates(html_text, site, query):
+    """Parse known distributor product cards before using generic extraction."""
+    rule = SITE_RULES.get(site["name"])
+    if not rule:
+        return []
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    candidates = {}
+    part = normalize(extract_part(query))
+    compact_part = re.sub(r"[^a-z0-9]", "", part)
+
+    for card_selector in rule["cards"]:
+        for block in soup.select(card_selector):
+            title_node = _first_selected(block, rule["title"])
+            link_node = _first_selected(block, rule["link"])
+            if not title_node or not link_node:
+                continue
+
+            title = clean_text(title_node.get_text(" ", strip=True))
+            href = link_node.get("href", "")
+            link = absolute_url(site, href)
+            if not title or not valid_product_url(site, link):
+                continue
+
+            hay = normalize(title + " " + href)
+            compact_hay = re.sub(r"[^a-z0-9]", "", hay)
+            if part and part not in hay and (not compact_part or compact_part not in compact_hay):
+                continue
+            if not component_match(title + " " + href, query):
+                continue
+
+            price_node = _first_selected(block, rule["price"])
+            price = clean_text(price_node.get_text(" ", strip=True)) if price_node else extract_price(block)
+            score = title_score(title, query) + (25 if part and part in hay else 0)
+            candidates[link] = {
+                "title": title[:350],
+                "link": link,
+                "price": price or "N/A",
+                "_score": score,
+            }
+            if len(candidates) >= MAX_LISTING_RESULTS:
+                break
+        if len(candidates) >= MAX_LISTING_RESULTS:
+            break
+
+    return sorted(candidates.values(), key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
+
+
 def extract_candidates(html_text, site, query):
+    specific = extract_site_specific_candidates(html_text, site, query)
+    if specific:
+        for item in specific:
+            item.update({"availability_state": "UNKNOWN", "stock_quantity": None, "availability": "Availability Not Confirmed"})
+        return specific
+
     soup = BeautifulSoup(html_text, "html.parser")
     candidates = {}
     part = normalize(extract_part(query))
@@ -364,7 +506,7 @@ class Browser:
             try:
                 page = await browser.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=BROWSER_PAGE_TIMEOUT)
-                await page.wait_for_timeout(700)
+                await page.wait_for_timeout(1600)
                 return await page.content()
             except Exception as exc:
                 print(f"Browser failed {url}: {type(exc).__name__}: {exc}")
@@ -481,48 +623,92 @@ async def robu_search(client, query):
 
 
 def site_search_urls(site, query):
-    q=quote_plus(query); origin=site["origin"].rstrip("/"); urls=[]
-    urls.append(site["search"].format(q=q))
-    kind=site["kind"]
-    if kind in {"woocommerce","generic"}:
-        urls += [f"{origin}/?s={q}&post_type=product", f"{origin}/?post_type=product&s={q}", f"{origin}/search/?q={q}", f"{origin}/search?q={q}", f"{origin}/index.php?route=product/search&search={q}"]
+    q = quote_plus(query)
+    origin = site["origin"].rstrip("/")
+    kind = site["kind"]
+    urls = [site["search"].format(q=q)]
+
+    if kind == "element14":
+        urls += [
+            f"{origin}/w/c/?st={q}",
+            f"{origin}/search?st={q}",
+        ]
+    elif kind in {"woocommerce", "generic"}:
+        urls += [
+            f"{origin}/?s={q}&post_type=product",
+            f"{origin}/?post_type=product&s={q}",
+            f"{origin}/search/?q={q}",
+            f"{origin}/search?q={q}",
+            f"{origin}/index.php?route=product/search&search={q}",
+        ]
     elif kind == "shopify":
-        urls += [f"{origin}/search?q={q}&type=product", f"{origin}/search?type=product&q={q}"]
+        urls += [
+            f"{origin}/search?q={q}&type=product",
+            f"{origin}/search?type=product&q={q}",
+        ]
     elif kind == "magento":
-        urls += [f"{origin}/catalogsearch/result/?q={q}", f"{origin}/search?q={q}"]
+        urls += [
+            f"{origin}/catalogsearch/result/?q={q}",
+            f"{origin}/search?q={q}",
+        ]
     elif kind == "opencart":
-        urls += [f"{origin}/index.php?route=product/search&search={q}", f"{origin}/search?search={q}"]
-    out=[]; seen=set()
-    for u in urls:
-        if u not in seen: seen.add(u); out.append(u)
+        urls += [
+            f"{origin}/index.php?route=product/search&search={q}",
+            f"{origin}/search?search={q}",
+        ]
+
+    out, seen = [], set()
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
     return out
 
 
 async def native_html_search(client, site, query):
     reached = False
-    for variant in query_variants(query):
-        for url in site_search_urls(site, variant):
-            html,status,_ = await fetch_http(client,url)
-            if html is None: continue
+    variants = query_variants(query)
+
+    # Pass 1: exact user query across all known native search forms.
+    for url in site_search_urls(site, variants[0]):
+        html, status, final_url = await fetch_http(client, url)
+        if html is None:
+            continue
+        reached = True
+        found = extract_candidates(html, site, query)
+        if found:
+            return found, True
+
+    # Pass 2: strongest fallback only against the two most useful forms.
+    for variant in variants[1:]:
+        for url in site_search_urls(site, variant)[:2]:
+            html, status, final_url = await fetch_http(client, url)
+            if html is None:
+                continue
             reached = True
-            found=extract_candidates(html,site,query)
-            if found: return found, True
-            # Do not stop on the first empty page: themes and search endpoints can
-            # differ. Continue through the remaining native search forms.
+            found = extract_candidates(html, site, query)
+            if found:
+                return found, True
+
     return [], reached
 
 
 async def browser_search(browser, site, query):
-    if await browser.start() is None: return [], False
-    for variant in query_variants(query):
-        for url in site_search_urls(site,variant)[:3]:
-            html=await browser.fetch(url)
-            if not html: continue
-            found=extract_candidates(html,site,query)
-            if found: return found, True
-            # Continue to the next search form if this page rendered but did not
-            # expose the expected product cards.
-    return [], False
+    if await browser.start() is None:
+        return [], False
+
+    variants = query_variants(query)
+    for variant in variants:
+        for url in site_search_urls(site, variant)[:2]:
+            html = await browser.fetch(url)
+            if not html:
+                continue
+            found = extract_candidates(html, site, query)
+            if found:
+                return found, True
+            # A rendered page proves the website was reachable even if its
+            # theme did not expose product cards in the expected structure.
+    return [], True
 
 
 async def shopify_product_json(client, site, link):
