@@ -33,7 +33,7 @@ PRODUCT_TIMEOUT = 4.5
 CAMOUFOX_START_TIMEOUT = 12.0
 CAMOUFOX_PAGE_TIMEOUT = 8000
 MAX_LISTING_RESULTS = 5
-MAX_VERIFY_RESULTS = 2
+MAX_VERIFY_RESULTS = 5
 MAX_CONCURRENT_SITES = 10
 
 SITES = [
@@ -85,10 +85,13 @@ def extract_part(query):
     if not tokens:
         return ""
 
-    # A token containing digits is normally the strongest part identifier.
+    # Prefer a mixed letter+number identifier such as LM2596 or ESP32.
+    # Do not accidentally treat a package/size token such as 0805 as the
+    # component identifier for queries like "Resistor SMD 0805".
     for token in tokens:
-        if re.search(r"\d", token):
-            return token.strip(" ,;:/()[]{}")
+        token = token.strip(" ,;:/()[]{}")
+        if re.search(r"[A-Za-z]", token) and re.search(r"\d", token):
+            return token
 
     return " ".join(tokens[:2])
 
@@ -515,27 +518,33 @@ async def search_robu_api(client, query):
 # SEARCH ONE SITE
 # -----------------------------------------------------------------------------
 async def verify_unknown_products(client, browser_fallback, products):
-    unknown = [
-        p for p in products
-        if p["availability_state"] == "UNKNOWN"
-    ][:MAX_VERIFY_RESULTS]
+    # Verify the top matching product pages, not only products whose listing
+    # page is ambiguous. This prevents stale/search-card stock text from being
+    # treated as the final availability state.
+    to_verify = products[:MAX_VERIFY_RESULTS]
 
-    if not unknown:
+    if not to_verify:
         return
 
     async def verify(product):
         page_html = await fetch_http(client, product["link"], timeout=PRODUCT_TIMEOUT)
         if page_html is None:
-            browser = await browser_fallback.get()
-            page_html = await camoufox_fetch(browser, product["link"])
+            try:
+                browser = await browser_fallback.get()
+                page_html = await camoufox_fetch(browser, product["link"])
+            except Exception:
+                page_html = None
 
         if page_html:
             state, qty = availability_from_html(page_html)
-            product["availability_state"] = state
-            product["stock_quantity"] = qty
-            product["availability"] = availability_label(state, qty)
+            # Only replace the listing state when the product page gives an
+            # explicit answer. Otherwise keep the already verified listing state.
+            if state != "UNKNOWN":
+                product["availability_state"] = state
+                product["stock_quantity"] = qty
+                product["availability"] = availability_label(state, qty)
 
-    await asyncio.gather(*(verify(p) for p in unknown))
+    await asyncio.gather(*(verify(p) for p in to_verify))
 
 
 async def search_site(client, browser_fallback, site, query):
@@ -545,7 +554,6 @@ async def search_site(client, browser_fallback, site, query):
         if api_results is not None:
             for p in api_results:
                 p.pop("_score", None)
-                p.pop("availability_state", None)
             return api_results
 
     search_url = site["search"].format(q=quote_plus(query))
@@ -574,7 +582,6 @@ async def search_site(client, browser_fallback, site, query):
 
     for p in verified:
         p.pop("_score", None)
-        p.pop("availability_state", None)
 
     return verified
 
@@ -648,9 +655,12 @@ async def event_generator(query, selected_sites=None):
                 })
 
                 if products:
+                    for product in products:
+                        product["site"] = site["name"]
                     yield sse({
                         "type": "result",
                         "site_id": site["id"],
+                        "site": site["name"],
                         "products": products,
                     })
 
