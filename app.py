@@ -453,6 +453,52 @@ async def camoufox_fetch(browser, url):
 
 
 # -----------------------------------------------------------------------------
+# SHOPIFY FAST PATH
+# -----------------------------------------------------------------------------
+async def search_shopify(client, site, query):
+    """Use Shopify's search-suggest JSON when available. This is more reliable
+    than scraping a JS-rendered search page and still verifies the product page
+    before the final result is returned.
+    """
+    url = site["origin"].rstrip("/") + "/search/suggest.json"
+    params = {
+        "q": query,
+        "resources[type]": "product",
+        "resources[limit]": str(MAX_LISTING_RESULTS),
+        "resources[options][unavailable_products]": "show",
+    }
+    try:
+        response = await client.get(url, params=params, timeout=HTTP_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        products = ((data.get("resources") or {}).get("results") or {}).get("products") or []
+        results = []
+        for item in products:
+            title = clean_text(item.get("title", ""))
+            if not title or not component_match(title, query):
+                continue
+            link = absolute_url(site, item.get("url", ""))
+            if not valid_product_url(site, link):
+                continue
+            state = "IN_STOCK" if item.get("available") is True else (
+                "OUT_OF_STOCK" if item.get("available") is False else "UNKNOWN"
+            )
+            results.append({
+                "title": title,
+                "link": link,
+                "price": clean_text(str(item.get("price", "") or "N/A")),
+                "availability_state": state,
+                "stock_quantity": None,
+                "availability": availability_label(state, None),
+                "_score": title_score(title, query),
+            })
+        return sorted(results, key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
+    except Exception as exc:
+        print(f"Shopify JSON failed for {site['name']}: {exc}")
+        return None
+
+
+# -----------------------------------------------------------------------------
 # ROBU FAST PATH
 # -----------------------------------------------------------------------------
 async def search_robu_api(client, query):
@@ -518,11 +564,10 @@ async def search_robu_api(client, query):
 # SEARCH ONE SITE
 # -----------------------------------------------------------------------------
 async def verify_unknown_products(client, browser_fallback, products):
-    # Verify the top matching product pages, not only products whose listing
-    # page is ambiguous. This prevents stale/search-card stock text from being
-    # treated as the final availability state.
+    # Verify every returned product page (up to MAX_VERIFY_RESULTS). This makes
+    # the product page, rather than the search result card, the final source of
+    # availability whenever the page exposes an explicit state.
     to_verify = products[:MAX_VERIFY_RESULTS]
-
     if not to_verify:
         return
 
@@ -537,8 +582,6 @@ async def verify_unknown_products(client, browser_fallback, products):
 
         if page_html:
             state, qty = availability_from_html(page_html)
-            # Only replace the listing state when the product page gives an
-            # explicit answer. Otherwise keep the already verified listing state.
             if state != "UNKNOWN":
                 product["availability_state"] = state
                 product["stock_quantity"] = qty
@@ -548,41 +591,47 @@ async def verify_unknown_products(client, browser_fallback, products):
 
 
 async def search_site(client, browser_fallback, site, query):
+    # Shopify stores expose a structured product search endpoint. Use it first.
+    if site["kind"] == "shopify":
+        shopify_results = await search_shopify(client, site, query)
+        if shopify_results:
+            products = shopify_results
+        else:
+            products = []
     # Robu: structured API is the fastest availability source.
-    if site["kind"] == "robu":
+    elif site["kind"] == "robu":
         api_results = await search_robu_api(client, query)
-        if api_results is not None:
-            for p in api_results:
-                p.pop("_score", None)
-            return api_results
+        products = api_results or []
+    else:
+        products = []
 
-    search_url = site["search"].format(q=quote_plus(query))
-    html_text = await fetch_http(client, search_url)
+    # Normal HTML search is the next path for non-Shopify sites, and a fallback
+    # for Shopify stores whose JSON search endpoint did not return products.
+    if not products:
+        search_url = site["search"].format(q=quote_plus(query))
+        html_text = await fetch_http(client, search_url)
 
-    # Camoufox is a fallback only. A failed site cannot hold up the others.
-    if html_text is None:
-        browser = await browser_fallback.get()
-        html_text = await camoufox_fetch(browser, search_url)
+        # If HTTP returned a JS shell or an incomplete search page, retry the
+        # search itself in Camoufox. Previously this fallback happened only when
+        # HTTP failed, which caused many valid products to appear as "not found".
+        if html_text is not None:
+            products = extract_products(html_text, site, query)
+        if not products:
+            browser = await browser_fallback.get()
+            html_text = await camoufox_fetch(browser, search_url)
+            if html_text:
+                products = extract_products(html_text, site, query)
 
-    if html_text is None:
-        return []
-
-    products = extract_products(html_text, site, query)
     if not products:
         return []
 
-    # Only the top 2 unknown-stock products get a product-page request.
+    # Verify the actual product pages. A search-card badge is not treated as
+    # authoritative when the product page gives a different explicit state.
     await verify_unknown_products(client, browser_fallback, products)
 
-    # Accurate mode: no availability claim if the site did not expose one.
-    verified = [
-        p for p in products
-        if p["availability_state"] != "UNKNOWN"
-    ]
-
+    verified = [p for p in products if p["availability_state"] != "UNKNOWN"]
     for p in verified:
         p.pop("_score", None)
-
     return verified
 
 
