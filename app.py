@@ -7,21 +7,14 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 try:
     from camoufox.async_api import AsyncCamoufox
-    CAMOUFOX_AVAILABLE = True
 except Exception:
-    CAMOUFOX_AVAILABLE = False
-
-
-# ============================================================
-# APP
-# ============================================================
+    AsyncCamoufox = None
 
 app = FastAPI(title="Component Finder API")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,1858 +23,673 @@ app.add_middleware(
     allow_credentials=False,
 )
 
-
-# ============================================================
-# DISTRIBUTORS
-# ============================================================
+# -----------------------------------------------------------------------------
+# CONFIGURATION
+# -----------------------------------------------------------------------------
+# Search is HTTP-first. Camoufox is started ONLY if a normal request fails.
+HTTP_TIMEOUT = 5.0
+SITE_TIMEOUT = 7.0
+PRODUCT_TIMEOUT = 4.5
+CAMOUFOX_START_TIMEOUT = 12.0
+CAMOUFOX_PAGE_TIMEOUT = 8000
+MAX_LISTING_RESULTS = 5
+MAX_VERIFY_RESULTS = 2
+MAX_CONCURRENT_SITES = 10
 
 SITES = [
-    {
-        "name": "ET Store",
-        "base": "https://etstore.in",
-        "search": lambda q: (
-            "https://etstore.in/index.php?"
-            "route=product/search&search=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Robu.in",
-        "base": "https://robu.in",
-        "search": lambda q: (
-            "https://robu.in/?s=" +
-            quote_plus(q) +
-            "&post_type=product"
-        ),
-    },
-
-    {
-        "name": "element14",
-        "base": "https://in.element14.com",
-        "search": lambda q: (
-            "https://in.element14.com/search?"
-            "st=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "ElectronicsComp",
-        "base": "https://www.electronicscomp.com",
-        "search": lambda q: (
-            "https://www.electronicscomp.com/index.php?"
-            "route=product/search&search=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Evelta",
-        "base": "https://evelta.com",
-        "search": lambda q: (
-            "https://evelta.com/catalogsearch/result/?q=" +
-            quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Tomson Electronics",
-        "base": "https://www.tomsonelectronics.com",
-        "search": lambda q: (
-            "https://www.tomsonelectronics.com/search?"
-            "q=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "QuartzComponents",
-        "base": "https://quartzcomponents.com",
-        "search": lambda q: (
-            "https://quartzcomponents.com/search?"
-            "q=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "MakerBazar",
-        "base": "https://makerbazar.in",
-        "search": lambda q: (
-            "https://makerbazar.in/search?"
-            "q=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Probots",
-        "base": "https://probots.co.in",
-        "search": lambda q: (
-            "https://probots.co.in/search?"
-            "q=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Sharvi Electronics",
-        "base": "https://sharvielectronics.com",
-        "search": lambda q: (
-            "https://sharvielectronics.com/search?"
-            "q=" + quote_plus(q)
-        ),
-    },
-
-    {
-        "name": "Leeds Electronics",
-        "base": "https://www.leedsind.com",
-        "search": None,
-    },
-
-    {
-        "name": "Sparefly",
-        "base": "https://sparefly.com",
-        "search": None,
-    },
+    {"id": "01", "name": "ET Store", "kind": "generic", "search": "https://etstore.in/index.php?route=product/search&search={q}", "origin": "https://etstore.in"},
+    {"id": "02", "name": "Robu.in", "kind": "robu", "search": "https://robu.in/?s={q}&post_type=product", "origin": "https://robu.in"},
+    {"id": "03", "name": "element14", "kind": "element14", "search": "https://in.element14.com/search?st={q}", "origin": "https://in.element14.com"},
+    {"id": "04", "name": "ElectronicsComp", "kind": "generic", "search": "https://www.electronicscomp.com/index.php?route=product/search&search={q}", "origin": "https://www.electronicscomp.com"},
+    {"id": "05", "name": "Evelta", "kind": "generic", "search": "https://evelta.com/catalogsearch/result/?q={q}", "origin": "https://evelta.com"},
+    {"id": "06", "name": "Tomson Electronics", "kind": "shopify", "search": "https://www.tomsonelectronics.com/search?q={q}", "origin": "https://www.tomsonelectronics.com"},
+    {"id": "07", "name": "QuartzComponents", "kind": "shopify", "search": "https://quartzcomponents.com/search?q={q}", "origin": "https://quartzcomponents.com"},
+    {"id": "08", "name": "MakerBazar", "kind": "shopify", "search": "https://makerbazar.in/search?q={q}", "origin": "https://makerbazar.in"},
+    {"id": "09", "name": "Probots", "kind": "shopify", "search": "https://probots.co.in/search?q={q}", "origin": "https://probots.co.in"},
+    {"id": "10", "name": "Sharvi Electronics", "kind": "shopify", "search": "https://sharvielectronics.com/search?q={q}", "origin": "https://sharvielectronics.com"},
+    {"id": "11", "name": "Leeds Electronics", "kind": "generic", "search": "https://www.leedsind.com/?s={q}", "origin": "https://www.leedsind.com"},
+    {"id": "12", "name": "Sparefly", "kind": "shopify", "search": "https://sparefly.com/search?q={q}", "origin": "https://sparefly.com"},
 ]
 
-
-SITE_MAP = {
-    site["name"]: site
-    for site in SITES
-}
-
-
-# ============================================================
-# HTTP SETTINGS
-# ============================================================
+SITE_BY_ID = {s["id"]: s for s in SITES}
+SITE_BY_NAME = {s["name"].lower(): s for s in SITES}
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/140.0.0.0 Safari/537.36"
+        "Chrome/140.0 Safari/537.36"
     ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,*/*;q=0.8"
-    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-IN,en;q=0.9",
-    "Cache-Control": "no-cache",
 }
 
-
-HTTP_TIMEOUT = httpx.Timeout(
-    connect=8.0,
-    read=15.0,
-    write=10.0,
-    pool=10.0,
-)
+ROBU_API = "https://robu.in/wp-json/wc/store/v1/products"
 
 
-# ============================================================
-# TEXT HELPERS
-# ============================================================
-
+# -----------------------------------------------------------------------------
+# HELPERS
+# -----------------------------------------------------------------------------
 def clean_text(value):
-    if value is None:
-        return ""
-
-    return re.sub(
-        r"\s+",
-        " ",
-        str(value)
-    ).strip()
+    return re.sub(r"\s+", " ", value or "").strip()
 
 
-def normalize_text(value):
-    value = clean_text(value).lower()
-
-    value = value.replace("–", "-")
-    value = value.replace("—", "-")
-    value = value.replace("_", " ")
-
-    return value
+def normalize(value):
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
 
 
-def make_absolute(base, link):
-    if not link:
-        return ""
-
-    link = clean_text(link)
-
-    if link.startswith("//"):
-        return "https:" + link
-
-    return urljoin(base, link)
-
-
-def same_domain(url, base):
-    try:
-        a = urlparse(url).netloc.lower()
-        b = urlparse(base).netloc.lower()
-
-        return (
-            a == b or
-            a.endswith("." + b) or
-            b.endswith("." + a)
-        )
-
-    except Exception:
-        return False
-
-
-# ============================================================
-# SEARCH TERM EXTRACTION
-# ============================================================
-
-def extract_main_component(query):
-    """
-    The first query token is treated as the primary part identifier.
-
-    Examples:
-
-        LM2596 3A
-            -> LM2596
-
-        Arduino Nano 3.3V
-            -> Arduino Nano
-
-        ESP32
-            -> ESP32
-    """
-
+def extract_part(query):
+    """LM2596 3A -> LM2596, ESP32 3.3V -> ESP32, Arduino Nano -> Arduino Nano."""
     q = clean_text(query)
-
-    if not q:
+    tokens = q.split()
+    if not tokens:
         return ""
 
-    voltage_pattern = re.compile(
-        r"^\d+(?:\.\d+)?\s*(?:v|volt|volts)$",
-        re.I
-    )
-
-    current_pattern = re.compile(
-        r"^\d+(?:\.\d+)?\s*(?:a|ma|amp|amps)$",
-        re.I
-    )
-
-    package_words = {
-        "dip",
-        "smd",
-        "smt",
-        "qfn",
-        "qfp",
-        "sop",
-        "soic",
-        "to220",
-        "to-220",
-        "to263",
-        "to-263",
-        "0805",
-        "0603",
-        "1206",
-    }
-
-    tokens = q.split()
-
-    output = []
-
+    # A token containing digits is normally the strongest part identifier.
     for token in tokens:
+        if re.search(r"\d", token):
+            return token.strip(" ,;:/()[]{}")
 
-        t = token.strip(" ,;")
-
-        if not t:
-            continue
-
-        if voltage_pattern.match(t):
-            continue
-
-        if current_pattern.match(t):
-            continue
-
-        if t.lower() in package_words:
-            continue
-
-        output.append(t)
-
-    if not output:
-        return tokens[0]
-
-    return " ".join(output)
+    return " ".join(tokens[:2])
 
 
-# ============================================================
-# PRODUCT MATCHING
-# ============================================================
-
-def normalize_part_token(token):
-    return re.sub(
-        r"[^a-z0-9]+",
-        "",
-        normalize_text(token)
-    )
+def query_tokens(query):
+    return [x for x in normalize(query).split() if len(x) > 1]
 
 
-def exact_component_match(title, query):
-    """
-    Strict product matching.
-
-    The product must contain the primary component identifier.
-
-    For multi-word component names, every meaningful token must
-    occur in the product title.
-
-    This prevents:
-
-        LM2596 -> LM358
-        Arduino Nano -> Arduino Uno
-        ESP32 -> ESP8266
-
-    from being returned.
-    """
-
-    title_norm = normalize_text(title)
-
-    if not title_norm:
+def component_match(title, query):
+    nt = normalize(title)
+    part = normalize(extract_part(query))
+    if not part or part not in nt:
         return False
 
-    main = extract_main_component(query)
-
-    if not main:
-        return False
-
-    main_tokens = [
-        normalize_part_token(x)
-        for x in main.split()
-        if len(normalize_part_token(x)) >= 2
-    ]
-
-    title_compact = normalize_part_token(title)
-
-    for token in main_tokens:
-        if token not in title_compact:
-            return False
-
+    # Text names need their first two words; numeric part numbers use the part ID.
+    if not re.search(r"\d", part):
+        return all(token in nt for token in query_tokens(query)[:2])
     return True
 
 
-def specification_match(title, query):
-    """
-    Secondary specification filter.
-
-    Specifications are not required when the website does not put
-    them into the product title.
-
-    However, if the specification is very distinctive and appears
-    directly in the title, it is used for ranking.
-    """
-
-    title_norm = normalize_text(title)
-    query_norm = normalize_text(query)
-
+def title_score(title, query):
+    nt = normalize(title)
+    nq = normalize(query)
+    part = normalize(extract_part(query))
     score = 0
-
-    query_tokens = query_norm.split()
-
-    for token in query_tokens:
-
-        token_clean = normalize_part_token(token)
-
-        if not token_clean:
-            continue
-
-        if len(token_clean) < 2:
-            continue
-
-        if token_clean in normalize_part_token(title_norm):
-            score += 1
-
+    if part and part in nt:
+        score += 100
+    if nq and nq in nt:
+        score += 60
+    for token in query_tokens(query):
+        if token in nt:
+            score += 10
     return score
 
 
-# ============================================================
-# AVAILABILITY
-# ============================================================
-
-IN_STOCK_PATTERNS = [
-    r"\bin\s*stock\b",
-    r"\binstock\b",
-    r"\bavailable\s+in\s+stock\b",
-    r"\bstock\s+available\b",
-    r"\bavailable\s+now\b",
-    r"\bready\s+to\s+ship\b",
-    r"\badd\s+to\s+(?:cart|basket)\b",
-]
+def absolute_url(site, href):
+    return urljoin(site["origin"], href or "")
 
 
-OUT_OF_STOCK_PATTERNS = [
-    r"\bout\s+of\s+stock\b",
-    r"\bsold\s+out\b",
-    r"\bcurrently\s+unavailable\b",
-    r"\bunavailable\b",
-    r"\bnot\s+available\b",
-    r"\bno\s+stock\b",
-    r"\bstock\s*:\s*0\b",
-]
-
-
-AVAILABLE_TO_ORDER_PATTERNS = [
-    r"\bavailable\s+to\s+order\b",
-    r"\bavailable\s+on\s+backorder\b",
-    r"\bbackorder\b",
-    r"\bback\s+order\b",
-    r"\bpre[\s-]?order\b",
-]
-
-
-def parse_number(value):
-    if value is None:
-        return None
-
-    text = clean_text(value)
-
-    match = re.search(
-        r"(?<![\d.])(\d{1,3}(?:,\d{3})*|\d+)(?![\d.])",
-        text
-    )
-
-    if not match:
-        return None
-
+def valid_product_url(site, link):
     try:
-        return int(match.group(1).replace(",", ""))
-
+        a = urlparse(link)
+        b = urlparse(site["origin"])
+        return a.scheme in ("http", "https") and a.netloc == b.netloc
     except Exception:
-        return None
-
-
-def availability_from_text(text):
-    """
-    Conservative availability parser.
-
-    IMPORTANT:
-    If there is no reliable availability indication,
-    returns UNKNOWN rather than IN_STOCK.
-    """
-
-    text = normalize_text(text)
-
-    if not text:
-        return {
-            "availability": "UNKNOWN",
-            "stock_quantity": None,
-            "availability_text": "",
-        }
-
-    # --------------------------------------------------------
-    # OUT OF STOCK HAS PRIORITY
-    # --------------------------------------------------------
-
-    for pattern in OUT_OF_STOCK_PATTERNS:
-        if re.search(pattern, text, re.I):
-            return {
-                "availability": "OUT_OF_STOCK",
-                "stock_quantity": 0,
-                "availability_text": "Out of Stock",
-            }
-
-    # --------------------------------------------------------
-    # NUMERIC STOCK
-    # --------------------------------------------------------
-
-    numeric_patterns = [
-        r"availability\s*[:\-]?\s*(\d[\d,]*)",
-        r"stock\s*[:\-]?\s*(\d[\d,]*)",
-        r"(\d[\d,]*)\s+in\s+stock",
-        r"quantity\s*[:\-]?\s*(\d[\d,]*)",
-        r"(\d[\d,]*)\s+available",
-    ]
-
-    for pattern in numeric_patterns:
-
-        match = re.search(pattern, text, re.I)
-
-        if match:
-
-            number = parse_number(match.group(1))
-
-            if number is not None:
-
-                if number > 0:
-                    return {
-                        "availability": "IN_STOCK",
-                        "stock_quantity": number,
-                        "availability_text": (
-                            f"{number:,} In Stock"
-                        ),
-                    }
-
-                return {
-                    "availability": "OUT_OF_STOCK",
-                    "stock_quantity": 0,
-                    "availability_text": "Out of Stock",
-                }
-
-    # --------------------------------------------------------
-    # AVAILABLE TO ORDER
-    # --------------------------------------------------------
-
-    for pattern in AVAILABLE_TO_ORDER_PATTERNS:
-
-        if re.search(pattern, text, re.I):
-
-            return {
-                "availability": "AVAILABLE_TO_ORDER",
-                "stock_quantity": None,
-                "availability_text": "Available to Order",
-            }
-
-    # --------------------------------------------------------
-    # NORMAL IN-STOCK
-    # --------------------------------------------------------
-
-    for pattern in IN_STOCK_PATTERNS:
-
-        if re.search(pattern, text, re.I):
-
-            return {
-                "availability": "IN_STOCK",
-                "stock_quantity": None,
-                "availability_text": "In Stock",
-            }
-
-    return {
-        "availability": "UNKNOWN",
-        "stock_quantity": None,
-        "availability_text": "Availability not disclosed",
-    }
-
-
-# ============================================================
-# STRUCTURED DATA AVAILABILITY
-# ============================================================
-
-def recursive_find_availability(obj):
-    """
-    Searches JSON-LD for:
-
-        offers.availability
-        offers.inventoryLevel
-        availability
-        inventory
-    """
-
-    if isinstance(obj, dict):
-
-        for key, value in obj.items():
-
-            key_lower = str(key).lower()
-
-            if key_lower in {
-                "availability",
-                "availabilitystatus",
-                "stockstatus",
-            }:
-
-                if isinstance(value, str):
-
-                    result = availability_from_text(value)
-
-                    if result["availability"] != "UNKNOWN":
-                        return result
-
-            if key_lower in {
-                "inventorylevel",
-                "inventory",
-                "stock",
-                "quantity",
-            }:
-
-                if isinstance(value, (int, float)):
-
-                    number = int(value)
-
-                    if number > 0:
-                        return {
-                            "availability": "IN_STOCK",
-                            "stock_quantity": number,
-                            "availability_text": (
-                                f"{number:,} In Stock"
-                            ),
-                        }
-
-            result = recursive_find_availability(value)
-
-            if result:
-                return result
-
-    elif isinstance(obj, list):
-
-        for item in obj:
-
-            result = recursive_find_availability(item)
-
-            if result:
-                return result
-
-    return None
-
-
-def parse_json_ld_availability(soup):
-
-    scripts = soup.find_all(
-        "script",
-        attrs={"type": "application/ld+json"}
-    )
-
-    for script in scripts:
-
-        raw = script.string or script.get_text()
-
-        if not raw:
-            continue
-
-        try:
-            data = json.loads(raw)
-
-        except Exception:
-            continue
-
-        result = recursive_find_availability(data)
-
-        if result:
-            return result
-
-    return None
-
-
-# ============================================================
-# PRODUCT PAGE AVAILABILITY
-# ============================================================
-
-def extract_availability_from_product_page(html):
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    # --------------------------------------------------------
-    # 1. JSON-LD
-    # --------------------------------------------------------
-
-    structured = parse_json_ld_availability(soup)
-
-    if structured:
-        return structured
-
-    # --------------------------------------------------------
-    # 2. META / ITEMPROP
-    # --------------------------------------------------------
-
-    meta_values = []
-
-    for element in soup.find_all(
-        attrs={
-            "itemprop": re.compile(
-                r"availability|inventory|stock",
-                re.I
-            )
-        }
-    ):
-
-        value = (
-            element.get("content")
-            or element.get("href")
-            or element.get_text(" ", strip=True)
-        )
-
-        if value:
-            meta_values.append(value)
-
-    if meta_values:
-
-        meta_text = " ".join(meta_values)
-
-        result = availability_from_text(meta_text)
-
-        if result["availability"] != "UNKNOWN":
-            return result
-
-    # --------------------------------------------------------
-    # 3. WooCommerce / Shopify common selectors
-    # --------------------------------------------------------
-
-    selectors = [
-        ".stock",
-        ".availability",
-        ".product-stock",
-        ".inventory",
-        ".inventory-status",
-        ".product-form__inventory",
-        ".product__inventory",
-        ".product-single__inventory",
-        ".quantity",
-        "[class*='stock']",
-        "[class*='availability']",
-        "[id*='stock']",
-        "[id*='availability']",
-    ]
-
-    snippets = []
-
-    for selector in selectors:
-
-        try:
-            elements = soup.select(selector)
-
-        except Exception:
-            continue
-
-        for element in elements[:10]:
-
-            text = element.get_text(
-                " ",
-                strip=True
-            )
-
-            if text:
-                snippets.append(text)
-
-    if snippets:
-
-        result = availability_from_text(
-            " ".join(snippets)
-        )
-
-        if result["availability"] != "UNKNOWN":
-            return result
-
-    # --------------------------------------------------------
-    # 4. Full visible page text
-    # --------------------------------------------------------
-
-    for element in soup([
-        "script",
-        "style",
-        "noscript",
-        "svg"
-    ]):
-        element.decompose()
-
-    visible_text = soup.get_text(
-        " ",
-        strip=True
-    )
-
-    return availability_from_text(
-        visible_text
-    )
-
-
-# ============================================================
-# PRICE
-# ============================================================
-
-def extract_price(soup):
-
-    selectors = [
-        ".price",
-        ".product-price",
-        ".price-box",
-        ".woocommerce-Price-amount",
-        ".money",
-        "[class*='price']",
-        "[id*='price']",
-    ]
-
-    for selector in selectors:
-
-        try:
-            element = soup.select_one(selector)
-
-        except Exception:
-            continue
-
-        if element:
-
-            text = clean_text(
-                element.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if text and len(text) < 150:
-                return text
-
-    text = soup.get_text(
-        " ",
-        strip=True
-    )
-
-    match = re.search(
-        r"(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d+)?",
-        text,
-        re.I
-    )
-
-    if match:
-        return match.group(0)
-
-    return "N/A"
-
-
-# ============================================================
-# SEARCH RESULT EXTRACTION
-# ============================================================
-
-def looks_like_product_url(url):
-
-    if not url:
         return False
 
-    path = urlparse(url).path.lower()
 
-    excluded = [
-        "/category/",
-        "/product-category/",
-        "/collections/",
-        "/search",
-        "/cart",
-        "/account",
-        "/login",
-        "/contact",
-        "/about",
-        "/blog",
-        "/tag/",
-        "/page/",
-    ]
-
-    for item in excluded:
-
-        if item in path:
-            return False
-
-    return True
-
-
-def generic_product_candidates(
-    html,
-    site,
-    query
-):
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
+def extract_price(block):
+    if not block or not hasattr(block, "select_one"):
+        return "N/A"
+    node = block.select_one(
+        ".price, .product-price, .price-box, [class*=price], [data-price]"
     )
+    return clean_text(node.get_text(" ", strip=True)) if node else "N/A"
 
-    candidates = []
-    seen = set()
 
-    selectors = [
-        "article",
-        ".product",
-        ".product-item",
-        ".product-card",
-        ".product-small",
-        ".product-thumb",
-        ".product-grid-item",
-        "li.product",
-        "[class*='product-item']",
-        "[class*='product-card']",
-        "[class*='product-thumb']",
+# -----------------------------------------------------------------------------
+# AVAILABILITY PARSING
+# -----------------------------------------------------------------------------
+def parse_availability(text):
+    low = clean_text(text).lower()
+    if not low:
+        return "UNKNOWN", None
+
+    # Numeric quantity first.
+    numeric_patterns = [
+        r"(?:availability|available|stock|quantity)\s*[:\-]?\s*([0-9][0-9,]*)",
+        r"([0-9][0-9,]*)\s+(?:in\s+stock|units?\s+in\s+stock|pcs?\s+in\s+stock)",
+        r"only\s+([0-9][0-9,]*)\s+in\s+stock",
+        r"([0-9][0-9,]*)\s+available",
     ]
+    for pattern in numeric_patterns:
+        match = re.search(pattern, low, re.I)
+        if match:
+            qty = int(match.group(1).replace(",", ""))
+            return ("IN_STOCK" if qty > 0 else "OUT_OF_STOCK"), qty
 
-    containers = []
+    if re.search(r"\bout\s*of\s*stock\b|\bsold\s*out\b|\bcurrently unavailable\b|\bunavailable\b", low):
+        return "OUT_OF_STOCK", 0
 
-    for selector in selectors:
+    if re.search(r"\bavailable\s+to\s+order\b|\bavailable\s+on\s+order\b|\bback\s*order\b|\bpre[- ]?order\b", low):
+        return "AVAILABLE_TO_ORDER", None
 
+    if re.search(r"\bin\s*stock\b|\bin-stock\b", low):
+        return "IN_STOCK", None
+
+    return "UNKNOWN", None
+
+
+def structured_availability(soup):
+    """Read schema.org Product/Offer availability without scanning the whole page."""
+    for script in soup.select('script[type="application/ld+json"]'):
+        raw = script.string or script.get_text()
+        if not raw:
+            continue
         try:
-            containers.extend(
-                soup.select(selector)
-            )
+            data = json.loads(raw)
         except Exception:
-            pass
+            continue
 
-    # If the site doesn't have obvious product containers,
-    # inspect links directly.
-    if not containers:
-        containers = soup.find_all("a")
-
-    for container in containers:
-
-        if container.name == "a":
-
-            link_element = container
-
-            title = clean_text(
-                container.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-        else:
-
-            link_element = container.select_one(
-                "a[href]"
-            )
-
-            if not link_element:
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            obj = stack.pop()
+            if not isinstance(obj, dict):
                 continue
 
-            title_element = (
-                container.select_one(
-                    "h1,h2,h3,h4,h5,h6,"
-                    ".product-title,"
-                    ".product-name,"
-                    ".name,"
-                    "[class*='title'],"
-                    "[class*='name']"
-                )
-            )
+            graph = obj.get("@graph")
+            if isinstance(graph, list):
+                stack.extend(graph)
 
-            title = clean_text(
-                title_element.get_text(
-                    " ",
-                    strip=True
-                )
-                if title_element
-                else link_element.get_text(
-                    " ",
-                    strip=True
-                )
-            )
+            offers = obj.get("offers")
+            if isinstance(offers, list):
+                stack.extend(offers)
+            elif isinstance(offers, dict):
+                stack.append(offers)
 
-        if not title:
+            availability = str(obj.get("availability", "")).lower()
+            if "instock" in availability:
+                qty = obj.get("inventoryLevel")
+                if isinstance(qty, dict):
+                    qty = qty.get("value")
+                try:
+                    qty = int(qty) if qty is not None else None
+                except Exception:
+                    qty = None
+                return "IN_STOCK", qty
+            if "outofstock" in availability:
+                return "OUT_OF_STOCK", 0
+            if "backorder" in availability or "preorder" in availability:
+                return "AVAILABLE_TO_ORDER", None
+
+    return "UNKNOWN", None
+
+
+def availability_from_html(html_text):
+    soup = BeautifulSoup(html_text, "html.parser")
+
+    state, qty = structured_availability(soup)
+    if state != "UNKNOWN":
+        return state, qty
+
+    # Important: do NOT scan the whole page for "add to cart". That often causes
+    # false positives from recommendations/header widgets. Use product regions only.
+    selectors = [
+        ".availability", ".stock", ".stock-status", ".product-stock",
+        ".inventory", ".product-info", ".product-information", ".product-form",
+        ".summary", "form.cart", "main",
+    ]
+
+    best = ("UNKNOWN", None)
+    for selector in selectors:
+        for node in soup.select(selector)[:3]:
+            state, qty = parse_availability(node.get_text(" ", strip=True))
+            if state == "IN_STOCK" and qty is not None:
+                return state, qty
+            if state == "OUT_OF_STOCK":
+                best = (state, qty)
+            elif state == "AVAILABLE_TO_ORDER" and best[0] == "UNKNOWN":
+                best = (state, qty)
+            elif state == "IN_STOCK" and best[0] == "UNKNOWN":
+                best = (state, qty)
+
+    return best
+
+
+def availability_label(state, qty):
+    if state == "IN_STOCK":
+        return f"In Stock ({qty:,})" if qty is not None else "In Stock"
+    if state == "OUT_OF_STOCK":
+        return "Out of Stock"
+    if state == "AVAILABLE_TO_ORDER":
+        return "Available to Order"
+    return "Unavailable"
+
+
+# -----------------------------------------------------------------------------
+# PRODUCT EXTRACTION
+# -----------------------------------------------------------------------------
+def product_blocks(soup, kind):
+    if kind == "robu":
+        selectors = [
+            "li.product", ".product-small", ".product-grid-item",
+            ".product-type-simple", ".products .product",
+        ]
+    elif kind == "element14":
+        selectors = [".product-listing", ".product-item", ".search-result", "article"]
+    elif kind == "shopify":
+        selectors = [
+            ".product-card", ".product-grid-item", ".grid-product",
+            ".product-item", ".card-wrapper", "li.grid__item", "article",
+        ]
+    else:
+        selectors = [
+            ".product-thumb", ".product-item", ".product-card",
+            ".product-grid-item", ".product", "article", "li",
+        ]
+
+    blocks = []
+    seen = set()
+    for selector in selectors:
+        for block in soup.select(selector):
+            marker = id(block)
+            if marker not in seen:
+                seen.add(marker)
+                blocks.append(block)
+    return blocks
+
+
+def extract_products(html_text, site, query):
+    soup = BeautifulSoup(html_text, "html.parser")
+    candidates = []
+    part = normalize(extract_part(query))
+
+    for block in product_blocks(soup, site["kind"]):
+        links = block.select("a[href]")
+        if not links:
             continue
 
-        if len(title) < 3 or len(title) > 500:
+        # Product link whose anchor text best matches the part number/name.
+        links.sort(key=lambda a: (
+            0 if part and part in normalize(a.get_text(" ", strip=True)) else 1,
+            len(a.get_text(" ", strip=True)),
+        ))
+        link_node = links[0]
+        link = absolute_url(site, link_node.get("href", ""))
+        if not valid_product_url(site, link):
             continue
 
-        link = make_absolute(
-            site["base"],
-            link_element.get("href")
+        title_node = block.select_one(
+            "h1,h2,h3,h4,h5,.product-title,.product-name,.name,"
+            ".woocommerce-loop-product__title,.caption h4 a"
+        )
+        title = clean_text(
+            title_node.get_text(" ", strip=True)
+            if title_node else link_node.get_text(" ", strip=True)
         )
 
-        if not link:
+        if len(title) < 3 or len(title) > 350:
+            continue
+        if not component_match(title, query):
             continue
 
-        if not same_domain(
-            link,
-            site["base"]
-        ):
-            continue
-
-        if not looks_like_product_url(link):
-            continue
-
-        # STRICT component filter
-        if not exact_component_match(
-            title,
-            query
-        ):
-            continue
-
-        key = link.lower()
-
-        if key in seen:
-            continue
-
-        seen.add(key)
+        local_text = clean_text(block.get_text(" ", strip=True))
+        state, qty = parse_availability(local_text)
 
         candidates.append({
             "title": title,
             "link": link,
-            "price": "N/A",
-            "score": specification_match(
-                title,
-                query
-            ),
+            "price": extract_price(block),
+            "availability_state": state,
+            "stock_quantity": qty,
+            "availability": availability_label(state, qty),
+            "_score": title_score(title, query),
         })
 
-    candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    return candidates[:12]
-
-
-# ============================================================
-# SITE-SPECIFIC SEARCH PARSER
-# ============================================================
-
-def parse_search_results(
-    html,
-    site,
-    query
-):
-
-    name = site["name"]
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    candidates = []
-
-    # --------------------------------------------------------
-    # ELEMENT14
-    # --------------------------------------------------------
-
-    if name == "element14":
-
-        selectors = [
-            "div.search-result",
-            "div.product",
-            "article",
-            "[class*='product']",
-        ]
-
-        containers = []
-
-        for selector in selectors:
-
-            containers.extend(
-                soup.select(selector)
-            )
-
-        for item in containers:
-
-            title_el = item.select_one(
-                "h2 a, h3 a, "
-                ".product-title a, "
-                "[class*='title'] a"
-            )
-
-            if not title_el:
-                continue
-
-            title = clean_text(
-                title_el.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            link = make_absolute(
-                site["base"],
-                title_el.get("href")
-            )
-
-            if not exact_component_match(
-                title,
-                query
-            ):
-                continue
-
-            candidates.append({
-                "title": title,
-                "link": link,
-                "price": extract_price(item),
-                "score": specification_match(
-                    title,
-                    query
-                ),
-            })
-
-    # --------------------------------------------------------
-    # ELECTRONICSCOMP
-    # --------------------------------------------------------
-
-    elif name == "ElectronicsComp":
-
-        containers = soup.select(
-            ".product-thumb, "
-            ".product-layout, "
-            ".product-item, "
-            ".product"
-        )
-
-        for item in containers:
-
-            title_el = item.select_one(
-                ".name a, "
-                ".product-name a, "
-                "h2 a, "
-                "h3 a, "
-                "h4 a, "
-                "a[href]"
-            )
-
-            if not title_el:
-                continue
-
-            title = clean_text(
-                title_el.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            link = make_absolute(
-                site["base"],
-                title_el.get("href")
-            )
-
-            if not exact_component_match(
-                title,
-                query
-            ):
-                continue
-
-            candidates.append({
-                "title": title,
-                "link": link,
-                "price": extract_price(item),
-                "score": specification_match(
-                    title,
-                    query
-                ),
-            })
-
-    # --------------------------------------------------------
-    # ET STORE
-    # --------------------------------------------------------
-
-    elif name == "ET Store":
-
-        containers = soup.select(
-            ".product-thumb"
-        )
-
-        for item in containers:
-
-            title_el = item.select_one(
-                ".caption h4 a"
-            )
-
-            if not title_el:
-                continue
-
-            title = clean_text(
-                title_el.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            link = make_absolute(
-                site["base"],
-                title_el.get("href")
-            )
-
-            if not exact_component_match(
-                title,
-                query
-            ):
-                continue
-
-            candidates.append({
-                "title": title,
-                "link": link,
-                "price": extract_price(item),
-                "score": specification_match(
-                    title,
-                    query
-                ),
-            })
-
-    # --------------------------------------------------------
-    # ROBU
-    # --------------------------------------------------------
-
-    elif name == "Robu.in":
-
-        containers = soup.select(
-            ".product-small, "
-            ".product-type-simple, "
-            "li.product, "
-            ".product"
-        )
-
-        for item in containers:
-
-            title_el = item.select_one(
-                ".name a, "
-                ".product-title a, "
-                ".woocommerce-loop-product__title, "
-                "h2 a, h3 a, h4 a, "
-                "a[href]"
-            )
-
-            if not title_el:
-                continue
-
-            title = clean_text(
-                title_el.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            link = make_absolute(
-                site["base"],
-                title_el.get("href")
-            )
-
-            if not exact_component_match(
-                title,
-                query
-            ):
-                continue
-
-            candidates.append({
-                "title": title,
-                "link": link,
-                "price": extract_price(item),
-                "score": specification_match(
-                    title,
-                    query
-                ),
-            })
-
-    # --------------------------------------------------------
-    # GENERIC SHOPIFY / OTHER SITES
-    # --------------------------------------------------------
-
+    # Fallback only when normal product cards were not detected.
     if not candidates:
-
-        candidates = generic_product_candidates(
-            html,
-            site,
-            query
-        )
-
-    # --------------------------------------------------------
-    # REMOVE DUPLICATES
-    # --------------------------------------------------------
+        for anchor in soup.select("a[href]"):
+            title = clean_text(anchor.get_text(" ", strip=True))
+            if not title or len(title) < 3 or len(title) > 220:
+                continue
+            if not component_match(title, query):
+                continue
+            link = absolute_url(site, anchor.get("href", ""))
+            if not valid_product_url(site, link):
+                continue
+            candidates.append({
+                "title": title,
+                "link": link,
+                "price": "N/A",
+                "availability_state": "UNKNOWN",
+                "stock_quantity": None,
+                "availability": "Unavailable",
+                "_score": title_score(title, query),
+            })
 
     unique = {}
-    for product in candidates:
+    for item in candidates:
+        unique[item["link"]] = item
 
-        link = product["link"]
-
-        if link not in unique:
-            unique[link] = product
-
-    candidates = list(
-        unique.values()
-    )
-
-    candidates.sort(
-        key=lambda x: x.get(
-            "score",
-            0
-        ),
-        reverse=True
-    )
-
-    return candidates[:12]
+    return sorted(unique.values(), key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
 
 
-# ============================================================
-# HTTP FETCH
-# ============================================================
-
-async def fetch_http(
-    client,
-    url
-):
-
+# -----------------------------------------------------------------------------
+# HTTP + LAZY CAMOUFOX
+# -----------------------------------------------------------------------------
+async def fetch_http(client, url, timeout=HTTP_TIMEOUT):
     try:
-
-        response = await client.get(
-            url,
-            timeout=HTTP_TIMEOUT,
-            follow_redirects=True,
-        )
-
-        if response.status_code >= 400:
+        response = await client.get(url, timeout=timeout, follow_redirects=True)
+        if response.status_code >= 400 or not response.text:
             return None
-
-        content_type = (
-            response.headers.get(
-                "content-type",
-                ""
-            ).lower()
-        )
-
-        if (
-            "text/html" not in content_type
-            and "application/xhtml" not in content_type
-        ):
-            return None
-
-        if len(response.text) < 500:
-            return None
-
         return response.text
-
-    except Exception:
+    except Exception as exc:
+        print(f"HTTP failed: {url} -> {exc}")
         return None
 
 
-# ============================================================
-# CAMOUFOX BROWSER
-# ============================================================
-
-class BrowserFetcher:
-
+class BrowserFallback:
     def __init__(self):
-        self.browser_context = None
+        self.cm = None
         self.browser = None
+        self.lock = asyncio.Lock()
 
-    async def start(self):
-
-        if not CAMOUFOX_AVAILABLE:
-            return False
-
-        try:
-
-            self.browser_context = AsyncCamoufox(
-                headless=True
-            )
-
-            self.browser = (
-                await self.browser_context.__aenter__()
-            )
-
-            return True
-
-        except Exception:
-
-            self.browser = None
-            self.browser_context = None
-
-            return False
-
-    async def fetch(self, url):
-
-        if not self.browser:
+    async def get(self):
+        # Camoufox is NEVER started during normal startup.
+        if self.browser is not None:
+            return self.browser
+        if AsyncCamoufox is None:
             return None
 
-        page = None
-
-        try:
-
-            page = await self.browser.new_page()
-
-            await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=25000,
-            )
-
+        async with self.lock:
+            if self.browser is not None:
+                return self.browser
             try:
-                await page.wait_for_load_state(
-                    "networkidle",
-                    timeout=7000
+                self.cm = AsyncCamoufox(
+                    headless=True,
+                    humanize=False,
+                    block_images=True,
                 )
-            except Exception:
-                pass
+                self.browser = await asyncio.wait_for(
+                    self.cm.__aenter__(),
+                    timeout=CAMOUFOX_START_TIMEOUT,
+                )
+            except Exception as exc:
+                print(f"Camoufox startup failed: {exc}")
+                self.cm = None
+                self.browser = None
 
-            html = await page.content()
-
-            return html
-
-        except Exception:
-
-            return None
-
-        finally:
-
-            if page:
-
-                try:
-                    await page.close()
-                except Exception:
-                    pass
+        return self.browser
 
     async def close(self):
-
-        if self.browser_context:
-
+        if self.cm is not None:
             try:
-                await self.browser_context.__aexit__(
-                    None,
-                    None,
-                    None
-                )
+                await self.cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+        self.cm = None
+        self.browser = None
+
+
+async def camoufox_fetch(browser, url):
+    if browser is None:
+        return None
+    page = None
+    try:
+        page = await browser.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=CAMOUFOX_PAGE_TIMEOUT)
+        return await page.content()
+    except Exception as exc:
+        print(f"Camoufox page failed: {url} -> {exc}")
+        return None
+    finally:
+        if page:
+            try:
+                await page.close()
             except Exception:
                 pass
 
-            self.browser_context = None
-            self.browser = None
 
-
-# ============================================================
-# VERIFY ONE PRODUCT
-# ============================================================
-
-async def verify_product(
-    client,
-    browser,
-    product
-):
-
-    url = product["link"]
-
-    html = await fetch_http(
-        client,
-        url
-    )
-
-    # --------------------------------------------------------
-    # CAMOUFOX FALLBACK
-    # --------------------------------------------------------
-
-    if not html and browser:
-
-        html = await browser.fetch(
-            url
+# -----------------------------------------------------------------------------
+# ROBU FAST PATH
+# -----------------------------------------------------------------------------
+async def search_robu_api(client, query):
+    try:
+        response = await client.get(
+            ROBU_API,
+            params={
+                "search": query,
+                "per_page": MAX_LISTING_RESULTS,
+                "catalog_visibility": "visible",
+            },
+            timeout=HTTP_TIMEOUT,
         )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, list):
+            return None
 
-    if not html:
+        results = []
+        for item in data:
+            title = clean_text(item.get("name", ""))
+            link = item.get("permalink", "")
+            if not title or not link or not component_match(title, query):
+                continue
 
-        return {
-            **product,
-            "availability": "UNKNOWN",
-            "stock_quantity": None,
-            "availability_text": (
-                "Product page could not be verified"
-            ),
-            "verified": False,
-        }
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    # Correct title from product page
-    page_title = ""
-
-    for selector in [
-        "h1",
-        ".product_title",
-        ".product-title",
-        "meta[property='og:title']",
-        "title",
-    ]:
-
-        try:
-
-            element = soup.select_one(
-                selector
+            prices = item.get("prices") or {}
+            raw_price = prices.get("price_html") or prices.get("price") or ""
+            price = clean_text(
+                BeautifulSoup(str(raw_price), "html.parser").get_text(" ", strip=True)
             )
 
-        except Exception:
-            element = None
-
-        if element:
-
-            if element.name == "meta":
-                value = element.get(
-                    "content",
-                    ""
-                )
+            if item.get("is_in_stock") is True:
+                state = "IN_STOCK"
+            elif item.get("is_in_stock") is False:
+                state = "OUT_OF_STOCK"
+            elif item.get("is_on_backorder"):
+                state = "AVAILABLE_TO_ORDER"
             else:
-                value = element.get_text(
-                    " ",
-                    strip=True
-                )
+                state = "UNKNOWN"
 
-            if value:
-                page_title = clean_text(
-                    value
-                )
-                break
+            qty = None
+            stock = item.get("stock_availability") or {}
+            if state == "UNKNOWN":
+                state, qty = parse_availability(clean_text(stock.get("text", "")))
 
-    if page_title:
+            results.append({
+                "title": title,
+                "link": link,
+                "price": price or "N/A",
+                "availability": availability_label(state, qty),
+                "availability_state": state,
+                "stock_quantity": qty,
+                "_score": title_score(title, query),
+            })
 
-        product["title"] = page_title
-
-    # --------------------------------------------------------
-    # AVAILABILITY
-    # --------------------------------------------------------
-
-    availability = (
-        extract_availability_from_product_page(
-            html
-        )
-    )
-
-    # --------------------------------------------------------
-    # PRICE
-    # --------------------------------------------------------
-
-    price = extract_price(
-        soup
-    )
-
-    if price != "N/A":
-        product["price"] = price
-
-    return {
-        **product,
-        "availability": availability[
-            "availability"
-        ],
-        "stock_quantity": availability[
-            "stock_quantity"
-        ],
-        "availability_text": availability[
-            "availability_text"
-        ],
-        "verified": True,
-    }
+        return sorted(results, key=lambda x: x["_score"], reverse=True)[:MAX_LISTING_RESULTS]
+    except Exception as exc:
+        print(f"Robu API failed: {exc}")
+        return None
 
 
-# ============================================================
+# -----------------------------------------------------------------------------
 # SEARCH ONE SITE
-# ============================================================
+# -----------------------------------------------------------------------------
+async def verify_unknown_products(client, browser_fallback, products):
+    unknown = [
+        p for p in products
+        if p["availability_state"] == "UNKNOWN"
+    ][:MAX_VERIFY_RESULTS]
 
-async def search_site(
-    client,
-    browser,
-    site,
-    query
-):
+    if not unknown:
+        return
 
-    # Sites without a verified public search endpoint
-    # are deliberately marked UNKNOWN instead of inventing
-    # search results.
+    async def verify(product):
+        page_html = await fetch_http(client, product["link"], timeout=PRODUCT_TIMEOUT)
+        if page_html is None:
+            browser = await browser_fallback.get()
+            page_html = await camoufox_fetch(browser, product["link"])
 
-    if not site.get("search"):
+        if page_html:
+            state, qty = availability_from_html(page_html)
+            product["availability_state"] = state
+            product["stock_quantity"] = qty
+            product["availability"] = availability_label(state, qty)
 
-        return {
-            "products": [],
-            "state": "not_supported",
-            "message": (
-                "No reliable public search endpoint"
-            ),
-        }
-
-    search_url = site["search"](query)
-
-    html = await fetch_http(
-        client,
-        search_url
-    )
-
-    # Browser fallback
-    if not html and browser:
-
-        html = await browser.fetch(
-            search_url
-        )
-
-    if not html:
-
-        return {
-            "products": [],
-            "state": "failed",
-            "message": "Search page unavailable",
-        }
-
-    candidates = parse_search_results(
-        html,
-        site,
-        query
-    )
-
-    if not candidates:
-
-        return {
-            "products": [],
-            "state": "done",
-            "message": "No exact matching products",
-        }
-
-    # --------------------------------------------------------
-    # VERIFY PRODUCT PAGES
-    # --------------------------------------------------------
-
-    verified_products = []
-
-    # Verify a limited number of best matches.
-    # This prevents a search for a generic component from
-    # opening hundreds of pages.
-    candidates = candidates[:8]
-
-    semaphore = asyncio.Semaphore(3)
-
-    async def verify_limited(product):
-
-        async with semaphore:
-
-            return await verify_product(
-                client,
-                browser,
-                product
-            )
-
-    results = await asyncio.gather(
-        *[
-            verify_limited(product)
-            for product in candidates
-        ],
-        return_exceptions=True
-    )
-
-    for result in results:
-
-        if isinstance(
-            result,
-            Exception
-        ):
-            continue
-
-        verified_products.append(
-            result
-        )
-
-    # --------------------------------------------------------
-    # ONLY SHOW PRODUCTS WITH A VERIFIED STATUS
-    #
-    # UNKNOWN products are still shown, but clearly marked.
-    # They are never called "In Stock".
-    # --------------------------------------------------------
-
-    return {
-        "products": verified_products,
-        "state": "done",
-        "message": "Product pages verified",
-    }
+    await asyncio.gather(*(verify(p) for p in unknown))
 
 
-# ============================================================
-# SSE
-# ============================================================
+async def search_site(client, browser_fallback, site, query):
+    # Robu: structured API is the fastest availability source.
+    if site["kind"] == "robu":
+        api_results = await search_robu_api(client, query)
+        if api_results is not None:
+            for p in api_results:
+                p.pop("_score", None)
+                p.pop("availability_state", None)
+            return api_results
 
+    search_url = site["search"].format(q=quote_plus(query))
+    html_text = await fetch_http(client, search_url)
+
+    # Camoufox is a fallback only. A failed site cannot hold up the others.
+    if html_text is None:
+        browser = await browser_fallback.get()
+        html_text = await camoufox_fetch(browser, search_url)
+
+    if html_text is None:
+        return []
+
+    products = extract_products(html_text, site, query)
+    if not products:
+        return []
+
+    # Only the top 2 unknown-stock products get a product-page request.
+    await verify_unknown_products(client, browser_fallback, products)
+
+    # Accurate mode: no availability claim if the site did not expose one.
+    verified = [
+        p for p in products
+        if p["availability_state"] != "UNKNOWN"
+    ]
+
+    for p in verified:
+        p.pop("_score", None)
+        p.pop("availability_state", None)
+
+    return verified
+
+
+# -----------------------------------------------------------------------------
+# SSE STREAM
+# -----------------------------------------------------------------------------
 def sse(data):
-
-    return (
-        "data: " +
-        json.dumps(
-            data,
-            ensure_ascii=False
-        ) +
-        "\n\n"
-    )
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def event_generator(
-    query,
-    requested_sites
-):
-
-    query = clean_text(
-        query
-    )
-
-    # --------------------------------------------------------
-    # SELECT SITES
-    # --------------------------------------------------------
-
-    if not requested_sites:
-
-        selected = SITES
-
+async def event_generator(query, selected_sites=None):
+    if selected_sites:
+        wanted = set()
+        for value in selected_sites:
+            value = value.strip()
+            if value in SITE_BY_ID:
+                wanted.add(value)
+            elif value.lower() in SITE_BY_NAME:
+                wanted.add(SITE_BY_NAME[value.lower()]["id"])
+        sites = [s for s in SITES if s["id"] in wanted]
     else:
-
-        selected_names = {
-            clean_text(name)
-            for name in requested_sites
-        }
-
-        selected = [
-            site
-            for site in SITES
-            if site["name"] in selected_names
-        ]
-
-    # --------------------------------------------------------
-    # INIT
-    # --------------------------------------------------------
+        sites = SITES
 
     yield sse({
         "type": "init",
-        "sites": [
-            site["name"]
-            for site in selected
-        ],
+        "sites": [{"id": s["id"], "name": s["name"]} for s in sites],
     })
 
-    if not selected:
+    browser_fallback = BrowserFallback()
 
-        yield sse({
-            "type": "done"
-        })
+    try:
+        limits = httpx.Limits(max_connections=24, max_keepalive_connections=12)
+        async with httpx.AsyncClient(
+            headers=HEADERS,
+            follow_redirects=True,
+            limits=limits,
+        ) as client:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_SITES)
 
-        return
-
-    browser = BrowserFetcher()
-
-    # Start browser once.
-    # It is reused for all failed pages.
-    await browser.start()
-
-    async with httpx.AsyncClient(
-        headers=HEADERS,
-        follow_redirects=True,
-    ) as client:
-
-        semaphore = asyncio.Semaphore(4)
-
-        async def process_site(site):
-
-            async with semaphore:
-
-                site_name = site["name"]
-
-                yield_data = []
-
-                yield_data.append(
-                    sse({
-                        "type": "status",
-                        "site": site_name,
-                        "state": "searching",
-                    })
-                )
-
-                try:
-
-                    result = await search_site(
-                        client,
-                        browser,
-                        site,
-                        query
-                    )
-
-                    products = result.get(
-                        "products",
-                        []
-                    )
-
-                    yield_data.append(
-                        sse({
-                            "type": "status",
-                            "site": site_name,
-                            "state": "done",
-                            "count": len(products),
-                            "message": result.get(
-                                "message",
-                                ""
-                            ),
-                        })
-                    )
-
-                    if products:
-
-                        yield_data.append(
-                            sse({
-                                "type": "result",
-                                "site": site_name,
-                                "products": products,
-                            })
+            async def run_one(site):
+                async with semaphore:
+                    try:
+                        products = await asyncio.wait_for(
+                            search_site(client, browser_fallback, site, query),
+                            timeout=SITE_TIMEOUT,
                         )
+                        return site, products, None
+                    except asyncio.TimeoutError:
+                        print(f"{site['name']} timed out")
+                        return site, [], "timeout"
+                    except Exception as exc:
+                        print(f"{site['name']} error: {exc}")
+                        return site, [], "error"
 
-                except Exception as exc:
+            tasks = [asyncio.create_task(run_one(site)) for site in sites]
+            checked = 0
+            total = len(sites)
 
-                    yield_data.append(
-                        sse({
-                            "type": "status",
-                            "site": site_name,
-                            "state": "done",
-                            "count": 0,
-                            "message": (
-                                "Search error"
-                            ),
-                        })
-                    )
+            for task in asyncio.as_completed(tasks):
+                site, products, error = await task
+                checked += 1
 
-                return yield_data
+                yield sse({
+                    "type": "site_done",
+                    "site_id": site["id"],
+                    "checked": checked,
+                    "total": total,
+                    "count": len(products),
+                    "state": "done" if error is None else "failed",
+                })
 
-        tasks = [
-            asyncio.create_task(
-                process_site(site)
-            )
-            for site in selected
-        ]
+                if products:
+                    yield sse({
+                        "type": "result",
+                        "site_id": site["id"],
+                        "products": products,
+                    })
 
-        for task in asyncio.as_completed(
-            tasks
-        ):
+            yield sse({"type": "done", "checked": checked, "total": total})
 
-            try:
-
-                messages = await task
-
-                for message in messages:
-                    yield message
-
-            except Exception:
-                pass
-
-    await browser.close()
-
-    yield sse({
-        "type": "done"
-    })
+    finally:
+        await browser_fallback.close()
 
 
-# ============================================================
-# API
-# ============================================================
+# -----------------------------------------------------------------------------
+# API ENDPOINTS
+# -----------------------------------------------------------------------------
+@app.get("/")
+async def root():
+    return JSONResponse({"status": "ok", "service": "component-finder"})
+
 
 @app.get("/api/sites")
 async def get_sites():
-
     return {
-        "sites": [
-            {
-                "name": site["name"],
-                "search_supported": bool(
-                    site.get("search")
-                ),
-            }
-            for site in SITES
-        ]
+        "sites": [{"id": s["id"], "name": s["name"]} for s in SITES]
     }
 
 
 @app.get("/api/search")
 async def search(
     q: str,
-    sites: list[str] | None = Query(
-        default=None
-    )
+    sites: list[str] | None = Query(default=None),
 ):
+    query = clean_text(q)
+    if not query:
+        return JSONResponse({"error": "Query is required"}, status_code=400)
 
     return StreamingResponse(
-        event_generator(
-            q,
-            sites
-        ),
+        event_generator(query, sites),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@app.get("/")
-async def root():
-
-    return {
-        "name": "Component Finder API",
-        "status": "online",
-        "sites": [
-            site["name"]
-            for site in SITES
-        ],
-    }
